@@ -17,8 +17,9 @@ systick_monotonic!(Mono, 1_00);
 )]
 
 mod app {
-    use embedded_hal::digital::{OutputPin, StatefulOutputPin};
+    use embedded_hal::digital::OutputPin;
     use rquangsheng::dp30g030_hal::gpio::{Output, Pin, Port};
+    use rquangsheng::dp30g030_hal::uart;
     use rtic_monotonics::{fugit::ExtU32, Monotonic as _};
 
     use crate::Mono;
@@ -34,6 +35,7 @@ mod app {
     struct Local {
         pin_flashlight: Pin<Output>,
         pin_backlight: Pin<Output>,
+        uart1: uart::Uart1,
     }
 
     #[init]
@@ -49,9 +51,31 @@ mod app {
             Pin::new(Port::C, 3).into_push_pull_output(&cx.device.SYSCON, &cx.device.PORTCON);
         let pin_backlight =
             Pin::new(Port::B, 6).into_push_pull_output(&cx.device.SYSCON, &cx.device.PORTCON);
+
+        // UART example: UART1 on PA7 (TX) / PA8 (RX), 38400-8N1.
+        let uart1_tx =
+            uart::TxPin::<rquangsheng::dp30g030_hal::UART1>::new(Pin::new(Port::A, 7)).unwrap();
+        let uart1_rx =
+            uart::RxPin::<rquangsheng::dp30g030_hal::UART1>::new(Pin::new(Port::A, 8)).unwrap();
+        let uart1_cfg = uart::Config::new(48_000_000, 38_400);
+        let uart1: uart::Uart1 = uart::Uart::<
+            rquangsheng::dp30g030_hal::UART1,
+            uart::TxPin<rquangsheng::dp30g030_hal::UART1>,
+            uart::RxPin<rquangsheng::dp30g030_hal::UART1>,
+        >::new(
+            cx.device.UART1,
+            &cx.device.SYSCON,
+            &cx.device.PORTCON,
+            uart1_tx,
+            uart1_rx,
+            uart1_cfg,
+        )
+        .unwrap();
+
         Mono::start(cx.core.SYST, 48_000_000);
 
         task1::spawn().ok();
+        uart_task::spawn().ok();
 
         (
             Shared {
@@ -61,6 +85,7 @@ mod app {
                 // Initialization of local resources go here
                 pin_flashlight,
                 pin_backlight,
+                uart1,
             },
         )
     }
@@ -88,6 +113,22 @@ mod app {
             cx.local.pin_flashlight.set_low();
             cx.local.pin_backlight.set_high();
             Mono::delay(500.millis()).await;
+        }
+    }
+
+    // UART demo task: writes a message periodically on UART1.
+    #[task(priority = 1, local = [uart1])]
+    async fn uart_task(cx: uart_task::Context) {
+        use embedded_hal_nb::serial::Write as _;
+        use nb::block;
+
+        loop {
+            for &b in b"Hello from UART1!\r\n" {
+                let _ = block!(cx.local.uart1.write(b));
+            }
+            let _ = block!(cx.local.uart1.flush());
+
+            Mono::delay(1.secs()).await;
         }
     }
 }

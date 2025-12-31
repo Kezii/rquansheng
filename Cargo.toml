@@ -20,6 +20,8 @@ portable-atomic = { version = "1.13.0", features = ["critical-section"] }
 # TODO add a monotonic if you use scheduling
 rtic-monotonics = { version = "2.1.0", features = [ "cortex-m-systick" ]}
 embedded-hal = "1.0.0"
+embedded-hal-nb = "1.0.0"
+nb = "1.1.0"
 
 # cargo build/run
 [profile.dev]
