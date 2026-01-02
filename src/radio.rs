@@ -58,7 +58,7 @@ where
     BUS: Bk4819Bus,
 {
     bk: Bk4819Driver<BUS>,
-    cfg: Config,
+    pub cfg: Config,
     mode: Mode,
     squelch_open: bool,
 }

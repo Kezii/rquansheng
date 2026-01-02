@@ -4,19 +4,41 @@
 
 use rquangsheng::{self as _, dp30g030_hal}; // global logger + panicking-behavior + memory layout
 
+use display_interface_spi::SPIInterface;
 use rtic_monotonics::systick::prelude::*;
+use st7565::{
+    types::{BoosterRatio, PowerControlMode},
+    DisplaySpecs,
+};
 use static_cell::StaticCell;
 
 systick_monotonic!(Mono, 1_00);
 
 // Use SysTick-based monotonic (100 Hz) as defmt timestamp: show uptime in seconds.
-defmt::timestamp!("{=f32}s", {
+defmt::timestamp!("{=f32:08}s", {
     let ticks = Mono::now().duration_since_epoch().ticks();
 
     ticks as f32 / 100.0
 });
 
 static SERIAL: StaticCell<dp30g030_hal::uart::Uart1> = StaticCell::new();
+
+pub struct FG12864390_FKFW;
+impl DisplaySpecs<128, 64, 8> for FG12864390_FKFW {
+    const FLIP_ROWS: bool = false;
+    const FLIP_COLUMNS: bool = true;
+    const INVERTED: bool = false;
+    const BIAS_MODE_1: bool = false;
+    const POWER_CONTROL: PowerControlMode = PowerControlMode {
+        booster_circuit: true,
+        voltage_regulator_circuit: true,
+        voltage_follower_circuit: true,
+    };
+    const VOLTAGE_REGULATOR_RESISTOR_RATIO: u8 = 0b100; // RR=4
+    const ELECTRONIC_VOLUME: u8 = 31;
+    const BOOSTER_RATIO: BoosterRatio = BoosterRatio::StepUp2x3x4x;
+    const COLUMN_OFFSET: u8 = 4;
+}
 
 // TODO(7) Configure the `rtic::app` macro
 #[rtic::app(
@@ -30,17 +52,45 @@ mod app {
     use core::cmp::min;
 
     use cortex_m::asm;
+    use display_interface_spi::SPIInterface;
+    use embedded_graphics::draw_target::DrawTarget;
+    use embedded_graphics::geometry::Dimensions;
+    use embedded_graphics::mono_font::ascii::{FONT_8X13, FONT_8X13_BOLD};
+    use embedded_graphics::mono_font::MonoTextStyle;
+    use embedded_graphics::pixelcolor::BinaryColor;
+    use embedded_graphics::prelude::Size;
+    use embedded_graphics::prelude::{Point, Primitive};
+    use embedded_graphics::primitives::{Circle, PrimitiveStyle, Rectangle};
+    use embedded_graphics::text::Text;
+    use embedded_graphics::Drawable;
     use embedded_hal::delay::DelayNs;
     use embedded_hal::digital::{InputPin, OutputPin};
+    use embedded_hal_bus::spi::ExclusiveDevice;
     use rquangsheng::bk4819::Bk4819Driver;
     use rquangsheng::bk4819_bitbang::{Bk4819, Bk4819BitBang, Dp32g030BidiPin};
     use rquangsheng::dp30g030_hal::adc;
     use rquangsheng::dp30g030_hal::gpio::{Input, Output, Pin, Port};
+    use rquangsheng::dp30g030_hal::spi;
     use rquangsheng::dp30g030_hal::uart;
     use rquangsheng::radio::{Config as RadioConfig, RadioController};
     use rtic_monotonics::{fugit::ExtU32, Monotonic as _};
+    use st7565::{GraphicsPageBuffer, ST7565};
+    use static_cell::StaticCell;
 
-    use crate::Mono;
+    use crate::{number_to_string, Mono, FG12864390_FKFW};
+
+    static PAGE_BUFFER: StaticCell<GraphicsPageBuffer<128, 8>> = StaticCell::new();
+
+    type DisplaySpiDevice = ExclusiveDevice<spi::Spi0, Pin<Output>, embedded_hal_bus::spi::NoDelay>;
+    type DisplayInterface = SPIInterface<DisplaySpiDevice, Pin<Output>>;
+    type Display = ST7565<
+        DisplayInterface,
+        FG12864390_FKFW,
+        st7565::modes::GraphicsMode<'static, 128, 8>,
+        128,
+        64,
+        8,
+    >;
 
     // Shared resources go here
     #[shared]
@@ -60,6 +110,7 @@ mod app {
         pin_ptt: Pin<Input>,
         adc: adc::Adc,
         radio_delay: CycleDelay,
+        display: Display,
     }
 
     /// Simple busy-wait delay based on core clock.
@@ -175,6 +226,54 @@ mod app {
         )
         .unwrap();
 
+        // --- Display (ST7565) -----------------------------------------------------
+        //
+        // Wiring from the reference UV-K5 firmware:
+        // - SPI0: PB8=CLK, PB10=MOSI (PB9 is used as A0/DC, so we run write-only, no MISO)
+        // - CS:   PB7 (we manage it as GPIO; embedded-hal `SpiBus` is bus-only)
+        // - A0/DC: PB9
+        // - RST:  PB11 (shared with SWDIO in stock firmware)
+        let spi0_sck =
+            spi::SckPin::<rquangsheng::dp30g030_hal::SPI0>::new(Pin::new(Port::B, 8)).unwrap();
+        let spi0_mosi =
+            spi::MosiPin::<rquangsheng::dp30g030_hal::SPI0>::new(Pin::new(Port::B, 10)).unwrap();
+        let spi0_cfg = spi::Config::uvk5_display_default();
+        let spi0: spi::Spi0 = spi::Spi::<
+            rquangsheng::dp30g030_hal::SPI0,
+            spi::SckPin<rquangsheng::dp30g030_hal::SPI0>,
+            spi::MosiPin<rquangsheng::dp30g030_hal::SPI0>,
+            spi::NoMiso,
+        >::new(
+            cx.device.SPI0,
+            &cx.device.SYSCON,
+            &cx.device.PORTCON,
+            spi0_sck,
+            spi0_mosi,
+            spi::NoMiso,
+            spi0_cfg,
+        )
+        .unwrap();
+
+        let pin_lcd_cs =
+            Pin::new(Port::B, 7).into_push_pull_output(&cx.device.SYSCON, &cx.device.PORTCON);
+        let pin_lcd_a0 =
+            Pin::new(Port::B, 9).into_push_pull_output(&cx.device.SYSCON, &cx.device.PORTCON);
+        let mut pin_lcd_rst =
+            Pin::new(Port::B, 11).into_push_pull_output(&cx.device.SYSCON, &cx.device.PORTCON);
+
+        let mut disp_delay = CycleDelay::new(48_000_000);
+
+        let disp_spidevice = ExclusiveDevice::new_no_delay(spi0, pin_lcd_cs).unwrap();
+        let disp_interface = SPIInterface::new(disp_spidevice, pin_lcd_a0);
+
+        let page_buffer = PAGE_BUFFER.init(GraphicsPageBuffer::new());
+        let mut display: Display =
+            ST7565::new(disp_interface, FG12864390_FKFW).into_graphics_mode(page_buffer);
+
+        display.reset(&mut pin_lcd_rst, &mut disp_delay).ok();
+        display.set_display_on(true).unwrap();
+        display.flush().unwrap();
+
         Mono::start(cx.core.SYST, 48_000_000);
 
         defmt::info!("init");
@@ -187,6 +286,7 @@ mod app {
         task1::spawn().ok();
         uart_task::spawn().ok();
         radio_10ms_task::spawn().ok();
+        display_task::spawn().ok();
 
         (
             Shared {
@@ -203,6 +303,7 @@ mod app {
                 pin_ptt,
                 adc,
                 radio_delay: CycleDelay::new(48_000_000),
+                display,
             },
         )
     }
@@ -218,7 +319,7 @@ mod app {
     }
 
     // TODO: Add tasks
-    #[task(priority = 1, local = [pin_flashlight, pin_backlight])]
+    #[task(priority = 1, local = [pin_flashlight])]
     async fn task1(cx: task1::Context<Local>) {
         defmt::info!("Hello from task1!");
 
@@ -242,6 +343,42 @@ mod app {
             defmt::info!("battery: (raw={=u16})", raw);
 
             Mono::delay(2.secs()).await;
+        }
+    }
+
+    // Display demo task: updates the ST7565 periodically with a simple pattern.
+    #[task(priority = 1, local = [pin_backlight,display], shared = [radio])]
+    async fn display_task(mut cx: display_task::Context) {
+        cx.local.pin_backlight.set_high();
+
+        loop {
+            let frequency = cx.shared.radio.lock(|r| r.cfg.freq_10hz / 10);
+
+            cx.local.display.clear(BinaryColor::Off).unwrap();
+
+            let font = MonoTextStyle::new(&FONT_8X13_BOLD, BinaryColor::On);
+            Text::new("Hello,\nRust!", Point::new(43, 22), font)
+                .draw(cx.local.display)
+                .unwrap();
+
+            // Send content to display
+            cx.local.display.flush().unwrap();
+
+            Rectangle::new(Point::new(41, 11), Size::new(50, 27))
+                .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 2))
+                .draw(cx.local.display)
+                .unwrap();
+
+            Text::new(
+                number_to_string(frequency).as_str(),
+                Point::new(38, 52),
+                font,
+            )
+            .draw(cx.local.display)
+            .unwrap();
+
+            cx.local.display.flush().unwrap();
+            Mono::delay(1000.millis()).await;
         }
     }
 
@@ -299,4 +436,12 @@ mod app {
             Mono::delay(10.millis()).await;
         }
     }
+}
+
+fn number_to_string(number: u32) -> heapless::String<8> {
+    use core::fmt::Write as _;
+
+    let mut string = heapless::String::new();
+    write!(&mut string, "{}", number).unwrap();
+    string
 }
