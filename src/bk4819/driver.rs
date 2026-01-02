@@ -104,6 +104,11 @@ impl<BUS> Bk4819Driver<BUS>
 where
     BUS: Bk4819Bus,
 {
+    /// Default microphone gain (0.5 dB/step, 0..=31).
+    ///
+    /// Reference firmware uses 5 presets: {3, 8, 16, 24, 31}. We choose the mid preset (16).
+    pub const DEFAULT_MIC_GAIN: u8 = 16;
+
     pub const fn new(bk: Bk4819<BUS>) -> Self {
         Self {
             bk,
@@ -164,7 +169,9 @@ where
         // REG_19: <15> MIC AGC 1=disable 0=enable
         self.write_register(Register::Reg19, 0b0001_0000_0100_0001)?;
 
-        self.write_register(Register::Reg7D, 0xE940)?;
+        // REG_7D: mic gain tuning (0.5 dB/step, 0..=31) in the low 5 bits.
+        // No EEPROM is available here, so use a sensible default.
+        self.set_mic_gain(Self::DEFAULT_MIC_GAIN)?;
 
         // REG_48 .. RX AF level (see C comments)
         self.write_register(Register::Reg48, (11u16 << 12) | (58u16 << 4) | 8u16)?;
@@ -184,6 +191,14 @@ where
         self.write_register(Register::Reg33, self.gpio_out_state)?;
         self.write_register(Register::Reg3F, 0x0000)?;
         Ok(())
+    }
+
+    /// Set microphone gain tuning (BK4819 REG_7D, low 5 bits).
+    ///
+    /// `gain` is in 0.5 dB/step, 0..=31.
+    pub fn set_mic_gain(&mut self, gain: u8) -> Result<(), BUS::Error> {
+        let gain = (gain & 0x1F) as u16;
+        self.write_register(Register::Reg7D, 0xE940 | gain)
     }
 
     /// Port of `BK4819_SetAGC(enable)`.

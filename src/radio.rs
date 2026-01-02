@@ -24,8 +24,10 @@ pub struct Config {
     pub bandwidth: FilterBandwidth,
     /// PA bias (board/calibration dependent). Use conservative values by default.
     pub tx_bias: u8,
-    /// Continuous test tone in TX (Hz).
-    pub tx_tone_hz: u32,
+    /// Microphone gain tuning (BK4819 REG_7D, 0.5 dB/step, 0..=31).
+    ///
+    /// No EEPROM is available in this project, so we hardcode a sensible default.
+    pub mic_gain: u8,
 }
 
 impl Config {
@@ -34,7 +36,7 @@ impl Config {
             freq_10hz: 43_300_000, // 433.00000 MHz
             bandwidth: FilterBandwidth::Narrow,
             tx_bias: 20,
-            tx_tone_hz: 1000,
+            mic_gain: 16, // ~8.0 dB (matches the reference firmware's mid preset)
         }
     }
 }
@@ -161,6 +163,8 @@ where
 
         self.bk.set_filter_bandwidth(self.cfg.bandwidth, true)?;
         self.bk.set_frequency_10hz(self.cfg.freq_10hz)?;
+        // Mic gain (C: BK4819_REG_7D = 0xE940 | (mic & 0x1f)).
+        self.bk.set_mic_gain(self.cfg.mic_gain)?;
         self.bk.prepare_transmit()?;
 
         delay.delay_ms(10);
@@ -175,9 +179,12 @@ where
 
         delay.delay_ms(10);
         self.bk.exit_sub_au()?;
-
-        // Continuous test tone: leaves TX running.
-        self.bk.transmit_tone(false, self.cfg.tx_tone_hz, delay)?;
+        // Make sure we're in normal voice TX:
+        // - tones disabled
+        // - modulation set (FM)
+        // - TX is already enabled by `prepare_transmit()` (REG_30=0xC1FE), so just leave it running.
+        self.bk.write_register(Register::Reg70, 0x0000)?;
+        self.bk.set_af(AfType::Fm)?;
 
         Ok(())
     }

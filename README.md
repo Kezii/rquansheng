@@ -1,8 +1,8 @@
 # rquansheng
 
-this is an highly experimetal from-scratch reimplementation for a firmnware for the quansheng uv-ke radio
+This is an highly experimental from-scratch reimplementation for a firmware for the Quansheng UV-K5 radio
 
-this is still based on the reverse-engineered C firmware, i.e. not a black box reimplementation, but it's a clean source code rewrite
+This is not a black box reimplementation, I'm still using the C code as reference, but the point is to move away from that, especially on the UI 
 
 
 # roadmap
@@ -12,14 +12,15 @@ this is still based on the reverse-engineered C firmware, i.e. not a black box r
 - [x] run RTIC
 - [x] gpio driver
 - [ ] adc / battery level
-- [x] working bk4819 bitbang driver
-- [x] working bk4819 hal and library
+- [x] bk4819 bitbang driver
+- [x] bk4819 hal and library
 - [ ] keyboard driver and events
 - [ ] display driver
 - [ ] eeprom driver 
 
 ## usage
 - [x] fm radio rx
-- [ ] fm radio tx
+- [x] fm radio tx
+- [ ] serial protocol for debug logs and remote control
 - [ ] basic UI
 - [ ] eeprom settings save
