@@ -14,7 +14,7 @@ This is not a black box reimplementation, I'm still using the C code as referenc
 - [ ] adc / battery level
 - [x] bk4819 bitbang driver
 - [x] bk4819 hal and library
-- [ ] keyboard driver and events
+- [x] keyboard driver and events
 - [x] display driver
 - [ ] eeprom driver 
 

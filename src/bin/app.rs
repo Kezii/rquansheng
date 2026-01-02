@@ -72,6 +72,7 @@ mod app {
     use rquangsheng::dp30g030_hal::gpio::{Input, Output, Pin, Port};
     use rquangsheng::dp30g030_hal::spi;
     use rquangsheng::dp30g030_hal::uart;
+    use rquangsheng::keyboard::KeyboardState;
     use rquangsheng::radio::{Config as RadioConfig, RadioController};
     use rtic_monotonics::{fugit::ExtU32, Monotonic as _};
     use st7565::{GraphicsPageBuffer, ST7565};
@@ -111,6 +112,7 @@ mod app {
         adc: adc::Adc,
         radio_delay: CycleDelay,
         display: Display,
+        keyboard_state: KeyboardState,
     }
 
     /// Simple busy-wait delay based on core clock.
@@ -288,6 +290,8 @@ mod app {
         radio_10ms_task::spawn().ok();
         display_task::spawn().ok();
 
+        let keyboard_state = rquangsheng::keyboard::KeyboardState::default();
+
         (
             Shared {
                 // Initialization of shared resources go here
@@ -304,6 +308,7 @@ mod app {
                 adc,
                 radio_delay: CycleDelay::new(48_000_000),
                 display,
+                keyboard_state,
             },
         )
     }
@@ -383,7 +388,7 @@ mod app {
     }
 
     /// 10ms tick task: poll+debounce PTT, poll BK4819 interrupts, and update audio.
-    #[task(priority = 1, shared = [radio, audio_on], local = [pin_audio_path, pin_ptt, radio_delay])]
+    #[task(priority = 1, shared = [radio, audio_on], local = [pin_audio_path, pin_ptt, radio_delay, keyboard_state])]
     async fn radio_10ms_task(mut cx: radio_10ms_task::Context) {
         // Simple debounce (like C firmware): require 3 consecutive 10ms samples.
         let mut ptt_last_sample = false;
@@ -431,6 +436,16 @@ mod app {
                 let _ = cx.local.pin_audio_path.set_high();
             } else {
                 let _ = cx.local.pin_audio_path.set_low();
+            }
+
+            {
+                let mut keyboard = rquangsheng::keyboard::Keyboard::init();
+
+                if let Some(key) =
+                    keyboard.get_event(&mut cx.local.keyboard_state, &mut cx.local.radio_delay)
+                {
+                    defmt::info!("key pressed: {:?}", key);
+                }
             }
 
             Mono::delay(10.millis()).await;

@@ -10,6 +10,7 @@ use panic_probe as _;
 pub mod bk4819;
 pub mod bk4819_bitbang;
 pub mod dp30g030_hal;
+pub mod keyboard;
 pub mod radio;
 use dp32g030 as _;
 
