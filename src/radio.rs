@@ -7,9 +7,10 @@
 
 use embedded_hal::delay::DelayNs;
 
-use crate::bk4819::regs::Register;
+use crate::bk4819::regs::Register_old;
 use crate::bk4819::{AfType, Bk4819Driver, FilterBandwidth, GpioPin};
 use crate::bk4819_bitbang::Bk4819Bus;
+use crate::bk4819_n::{Reg3F, Register};
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum Mode {
@@ -18,7 +19,7 @@ pub enum Mode {
 }
 
 #[derive(Copy, Clone, Debug)]
-pub struct Config {
+pub struct ChannelConfig {
     /// RX/TX frequency in Hz
     pub freq: u32,
     pub bandwidth: FilterBandwidth,
@@ -30,7 +31,7 @@ pub struct Config {
     pub mic_gain: u8,
 }
 
-impl Config {
+impl ChannelConfig {
     pub const fn default_uhf_433() -> Self {
         Self {
             freq: 433_000_000, // 433.00000 MHz
@@ -57,8 +58,8 @@ pub struct RadioController<BUS>
 where
     BUS: Bk4819Bus,
 {
-    bk: Bk4819Driver<BUS>,
-    pub cfg: Config,
+    pub bk: Bk4819Driver<BUS>,
+    pub channel_cfg: ChannelConfig,
     mode: Mode,
     squelch_open: bool,
 }
@@ -67,10 +68,10 @@ impl<BUS> RadioController<BUS>
 where
     BUS: Bk4819Bus,
 {
-    pub fn new(bk: Bk4819Driver<BUS>, cfg: Config) -> Self {
+    pub fn new(bk: Bk4819Driver<BUS>, cfg: ChannelConfig) -> Self {
         Self {
             bk,
-            cfg,
+            channel_cfg: cfg,
             mode: Mode::Rx,
             squelch_open: false,
         }
@@ -113,37 +114,28 @@ where
         self.mode = Mode::Rx;
         self.squelch_open = false;
 
-        self.bk.set_filter_bandwidth(self.cfg.bandwidth, true)?;
+        self.bk
+            .set_filter_bandwidth(self.channel_cfg.bandwidth, true)?;
         self.bk.setup_power_amplifier(0, 0)?;
         self.bk
             .toggle_gpio_out(GpioPin::Gpio1Pin29PaEnable, false)?;
         self.bk.toggle_gpio_out(GpioPin::Gpio5Pin1Red, false)?;
         self.bk.toggle_gpio_out(GpioPin::Gpio6Pin2Green, false)?;
 
-        self.bk.set_frequency(self.cfg.freq)?;
+        self.bk.set_frequency(self.channel_cfg.freq)?;
         self.bk
-            .pick_rx_filter_path_based_on_frequency(self.cfg.freq)?;
+            .pick_rx_filter_path_based_on_frequency(self.channel_cfg.freq)?;
         self.bk.toggle_gpio_out(GpioPin::Gpio0Pin28RxEnable, true)?;
 
         // Squelch thresholds: no EEPROM, pick conservative defaults.
-        let (open_rssi, close_rssi, open_noise, close_noise, close_glitch, open_glitch) =
-            default_squelch_thresholds(self.cfg.freq);
-        self.bk.setup_squelch(
-            open_rssi,
-            close_rssi,
-            open_noise,
-            close_noise,
-            close_glitch,
-            open_glitch,
-        )?;
+        let thresholds = default_squelch_thresholds(self.channel_cfg.freq);
+        self.bk.setup_squelch(thresholds)?;
 
-        // Enable squelch interrupts (C: InterruptMask includes FOUND/LOST, then write REG_3F).
-        const REG_3F_SQUELCH_FOUND: u16 = 1u16 << 3;
-        const REG_3F_SQUELCH_LOST: u16 = 1u16 << 2;
-        self.bk
-            .write_register(Register::Reg3F, REG_3F_SQUELCH_FOUND | REG_3F_SQUELCH_LOST)?;
-        // Clear pending interrupt/status bits.
-        let _ = self.bk.write_register(Register::Reg02, 0);
+        self.bk.write_register_n(Register::Reg3F(
+            Reg3F::new()
+                .with_squelch_found_en(true)
+                .with_squelch_lost_en(true),
+        ))?;
 
         // Start muted; tick task will unmute on squelch-open event.
         let _ = self.bk.set_af(AfType::Mute);
@@ -161,21 +153,22 @@ where
         self.bk.toggle_gpio_out(GpioPin::Gpio6Pin2Green, false)?;
         self.bk.toggle_gpio_out(GpioPin::Gpio5Pin1Red, true)?;
 
-        self.bk.set_filter_bandwidth(self.cfg.bandwidth, true)?;
-        self.bk.set_frequency(self.cfg.freq)?;
+        self.bk
+            .set_filter_bandwidth(self.channel_cfg.bandwidth, true)?;
+        self.bk.set_frequency(self.channel_cfg.freq)?;
         // Mic gain (C: BK4819_REG_7D = 0xE940 | (mic & 0x1f)).
-        self.bk.set_mic_gain(self.cfg.mic_gain)?;
+        self.bk.set_mic_gain(self.channel_cfg.mic_gain)?;
         self.bk.prepare_transmit()?;
 
         delay.delay_ms(10);
 
         self.bk
-            .pick_rx_filter_path_based_on_frequency(self.cfg.freq)?;
+            .pick_rx_filter_path_based_on_frequency(self.channel_cfg.freq)?;
         self.bk.toggle_gpio_out(GpioPin::Gpio1Pin29PaEnable, true)?;
 
         delay.delay_ms(5);
         self.bk
-            .setup_power_amplifier(self.cfg.tx_bias, self.cfg.freq)?;
+            .setup_power_amplifier(self.channel_cfg.tx_bias, self.channel_cfg.freq)?;
 
         delay.delay_ms(10);
         self.bk.exit_sub_au()?;
@@ -183,7 +176,7 @@ where
         // - tones disabled
         // - modulation set (FM)
         // - TX is already enabled by `prepare_transmit()` (REG_30=0xC1FE), so just leave it running.
-        self.bk.write_register(Register::Reg70, 0x0000)?;
+        self.bk.write_register_old(Register_old::Reg70, 0x0000)?;
         self.bk.set_af(AfType::Fm)?;
 
         Ok(())
@@ -207,16 +200,16 @@ where
         // while (ReadRegister(REG_0C) & 1) { WriteRegister(REG_02, 0); st=ReadRegister(REG_02); ... }
         // Safety cap: avoid spinning forever if the line is stuck.
         for _ in 0..8 {
-            let irq_req = self.bk.read_register(Register::Reg0C)? & 1;
+            let irq_req = self.bk.read_register_old(Register_old::Reg0C)? & 1;
             if irq_req == 0 {
                 break;
             }
 
             // clear interrupts first (as in C)
-            self.bk.write_register(Register::Reg02, 0)?;
+            self.bk.write_register_old(Register_old::Reg02, 0)?;
 
             // then read status bits
-            let st = self.bk.read_register(Register::Reg02)?;
+            let st = self.bk.read_register_old(Register_old::Reg02)?;
 
             if (st & REG_02_SQUELCH_LOST) != 0 {
                 self.squelch_open = true;
@@ -240,12 +233,35 @@ where
     }
 }
 
-fn default_squelch_thresholds(freq_10hz: u32) -> (u8, u8, u8, u8, u8, u8) {
+pub struct SquelchThresholds {
+    pub open_rssi: u8,
+    pub close_rssi: u8,
+    pub open_noise: u8,
+    pub close_noise: u8,
+    pub close_glitch: u8,
+    pub open_glitch: u8,
+}
+
+fn default_squelch_thresholds(freq_hz: u32) -> SquelchThresholds {
     // Same as the previous app-level helper, but lives here now.
-    let is_vhf = freq_10hz < 17_400_000;
+    let is_vhf = freq_hz < 170_400_000;
     if is_vhf {
-        (70, 55, 50, 60, 70, 80)
+        SquelchThresholds {
+            open_rssi: 70,
+            close_rssi: 55,
+            open_noise: 50,
+            close_noise: 60,
+            close_glitch: 70,
+            open_glitch: 80,
+        }
     } else {
-        (40, 30, 45, 55, 70, 80)
+        SquelchThresholds {
+            open_rssi: 40,
+            close_rssi: 30,
+            open_noise: 45,
+            close_noise: 55,
+            close_glitch: 70,
+            open_glitch: 80,
+        }
     }
 }

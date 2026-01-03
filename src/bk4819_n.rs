@@ -1,5 +1,7 @@
 use bitfield_struct::{bitenum, bitfield};
 
+use crate::{bk4819::Bk4819Driver, bk4819_bitbang::Bk4819Bus};
+
 // THIS DRIVER IS A BEST EFFORT ATTEMPT AT PARSING THE DOCUMENTATION
 // WARNING: THIS DRIVER IS NOT GUARANTEED TO BE CORRECT
 // WARNING: THIS HAS BEEN TOUCHED BY AN LLM
@@ -349,6 +351,15 @@ impl Register {
             Register::Reg7D(_) => Register::Reg7D(Reg7D::from(data)),
             Register::Reg7E(_) => Register::Reg7E(Reg7E::from(data)),
         }
+    }
+
+    pub fn read<BUS: Bk4819Bus>(
+        &mut self,
+        radio: &mut Bk4819Driver<BUS>,
+    ) -> Result<Self, BUS::Error> {
+        let reg = radio.read_register_n(*self)?;
+
+        Ok(reg)
     }
 }
 
@@ -709,10 +720,20 @@ pub enum Reg47AfOutSel {
     ToneRx = 2,
     /// Beep out for Tx (enable Tone1 and REG_03[9]=1)
     BeepTx = 3,
+    Baseband1 = 4,
+    Baseband2 = 5,
     /// CTCSS/CDCSS out for Rx test
     CtcssCdcssRxTest = 6,
+    Am = 7,
     /// FSK out for Rx test
-    FskRxTest = 8,
+    FskOutRx = 8,
+    Unknown3 = 9,
+    Unknown4 = 10,
+    Unknown5 = 11,
+    Unknown6 = 12,
+    Unknown7 = 13,
+    Unknown8 = 14,
+    Unknown9 = 15,
 }
 
 #[bitenum()]
@@ -1458,7 +1479,7 @@ pub struct Reg47 {
     __0: u8,
     /// AF Output Selection.
     #[bits(4)]
-    pub af_out_sel: Reg47AfOutSel,
+    pub af_output_selection: Reg47AfOutSel,
     #[bits(1)]
     __: u8,
     /// AF Output Inverse Mode. 1=Inverse.

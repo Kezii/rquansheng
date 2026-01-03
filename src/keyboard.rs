@@ -1,11 +1,3 @@
-//! Keyboard (keypad) scanner for the Quansheng UV-K5.
-//!
-//! This is a direct port of `uv-k5-firmware-custom/driver/keyboard.c`:
-//! - matrix scan using GPIOA pins
-//! - simple de-noise (3 stable reads, up to 8 samples)
-//! - shared pins: PA10/PA11 (I2C), PA12/PA13 (voice chip) are restored to the
-//!   same post-scan state as the C firmware (`I2C_Stop()` + VOICE reset).
-
 use dp32g030 as pac;
 
 use embedded_hal::delay::DelayNs;
@@ -195,9 +187,7 @@ const KEYBOARD: [KeyboardRow; 5] = [
     },
 ];
 
-/// Keyboard scanner with minimal event state.
 pub struct Keyboard {
-    // We keep the pins alive (and configured) after init.
     _col0: Pin<Input>,
     _col1: Pin<Input>,
     _col2: Pin<Input>,

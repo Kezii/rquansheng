@@ -4,11 +4,12 @@ use embedded_hal::delay::DelayNs;
 
 use crate::{
     bk4819_bitbang::{Bk4819, Bk4819Bus},
-    bk4819_n::{self, Reg00},
+    bk4819_n::{self, Reg00, Reg67, Register},
+    radio::SquelchThresholds,
 };
 
 use super::regs::{
-    GpioPin as RegGpioPin, Register, RegisterSpec, REG_07_MODE_CDCSS, REG_07_MODE_CTC1,
+    GpioPin as RegGpioPin, RegisterSpec, Register_old, REG_07_MODE_CDCSS, REG_07_MODE_CTC1,
     REG_07_MODE_CTC2, REG_24_ENABLE, REG_24_SELECT_DTMF, REG_24_SHIFT_MAX_SYMBOLS,
     REG_24_SHIFT_THRESHOLD, REG_24_SHIFT_UNKNOWN_15, REG_24_SHIFT_UNKNOWN_6,
     REG_30_DISABLE_MIC_ADC, REG_30_DISABLE_PA_GAIN, REG_30_DISABLE_RX_DSP, REG_30_DISABLE_RX_LINK,
@@ -126,13 +127,13 @@ where
 
     #[inline]
     #[deprecated]
-    pub fn read_register(&mut self, reg: Register) -> Result<u16, BUS::Error> {
+    pub fn read_register_old(&mut self, reg: Register_old) -> Result<u16, BUS::Error> {
         self.bk.read_reg(reg.as_u8())
     }
 
     #[inline]
     #[deprecated]
-    pub fn write_register(&mut self, reg: Register, value: u16) -> Result<(), BUS::Error> {
+    pub fn write_register_old(&mut self, reg: Register_old, value: u16) -> Result<(), BUS::Error> {
         self.bk.write_reg(reg.as_u8(), value)
     }
 
@@ -140,18 +141,12 @@ where
         self.bk.write_reg_n(reg)
     }
 
+    // TODO: this api fucking sucks
     pub fn read_register_n(
         &mut self,
         reg: bk4819_n::Register,
     ) -> Result<bk4819_n::Register, BUS::Error> {
         self.bk.read_reg_n(reg)
-    }
-
-    /// Read-modify-write helper (port of `BK4819_SetRegValue(RegisterSpec, v)`).
-    pub fn set_reg_value(&mut self, s: RegisterSpec, v: u16) -> Result<(), BUS::Error> {
-        let cur = self.read_register(s.num)?;
-        let cleared = cur & !(s.mask << s.offset);
-        self.write_register(s.num, cleared | (v << s.offset))
     }
 
     /// Port of `scale_freq()` from the C firmware.
@@ -273,7 +268,7 @@ where
 
     /// Port of `BK4819_SetAGC(enable)`.
     pub fn set_agc(&mut self, enable: bool) -> Result<(), BUS::Error> {
-        let reg_val = self.read_register(Register::Reg7E)?;
+        let reg_val = self.read_register_old(Register_old::Reg7E)?;
         // C uses: if(!(regVal & (1<<15)) == enable) return;
         let currently_enabled = (reg_val & (1u16 << 15)) == 0;
         if currently_enabled == enable {
@@ -282,25 +277,25 @@ where
         let next = (reg_val & !(1u16 << 15) & !(0b111u16 << 12))
             | ((!enable as u16) << 15) // 0=auto(AGC on), 1=fix(AGC off)
             | (3u16 << 12); // fix index
-        self.write_register(Register::Reg7E, next)
+        self.write_register_old(Register_old::Reg7E, next)
     }
 
     /// Port of `BK4819_InitAGC(amModulation)`.
     pub fn init_agc(&mut self, am_modulation: bool) -> Result<(), BUS::Error> {
-        self.write_register(Register::Reg13, 0x03BE)?;
-        self.write_register(Register::Reg12, 0x037B)?;
-        self.write_register(Register::Reg11, 0x027B)?;
-        self.write_register(Register::Reg10, 0x007A)?;
+        self.write_register_old(Register_old::Reg13, 0x03BE)?;
+        self.write_register_old(Register_old::Reg12, 0x037B)?;
+        self.write_register_old(Register_old::Reg11, 0x027B)?;
+        self.write_register_old(Register_old::Reg10, 0x007A)?;
 
         if am_modulation {
-            self.write_register(Register::Reg14, 0x0000)?;
-            self.write_register(Register::Reg49, (50u16 << 7) | 32u16)?;
+            self.write_register_old(Register_old::Reg14, 0x0000)?;
+            self.write_register_old(Register_old::Reg49, (50u16 << 7) | 32u16)?;
         } else {
-            self.write_register(Register::Reg14, 0x0019)?;
-            self.write_register(Register::Reg49, (84u16 << 7) | 56u16)?;
+            self.write_register_old(Register_old::Reg14, 0x0019)?;
+            self.write_register_old(Register_old::Reg49, (84u16 << 7) | 56u16)?;
         }
 
-        self.write_register(Register::Reg7B, 0x8420)?;
+        self.write_register_old(Register_old::Reg7B, 0x8420)?;
         Ok(())
     }
 
@@ -314,15 +309,15 @@ where
         } else {
             self.gpio_out_state &= !bit;
         }
-        self.write_register(Register::Reg33, self.gpio_out_state)
+        self.write_register_old(Register_old::Reg33, self.gpio_out_state)
     }
 
     // --- CTCSS / CDCSS ------------------------------------------------------
 
     /// Port of `BK4819_SetCDCSSCodeWord(code_word)`.
     pub fn set_cdcss_code_word(&mut self, code_word: u32) -> Result<(), BUS::Error> {
-        self.write_register(
-            Register::Reg51,
+        self.write_register_old(
+            Register_old::Reg51,
             REG_51_ENABLE_CXCSS
                 | REG_51_GPIO6_PIN2_NORMAL
                 | REG_51_TX_CDCSS_POSITIVE
@@ -335,11 +330,11 @@ where
         )?;
 
         // C: BK4819_REG_07_MODE_CTC1 | 2775
-        self.write_register(Register::Reg07, REG_07_MODE_CTC1 | 2775u16)?;
+        self.write_register_old(Register_old::Reg07, REG_07_MODE_CTC1 | 2775u16)?;
 
-        self.write_register(Register::Reg08, (code_word as u16) & 0x0FFF)?;
-        self.write_register(
-            Register::Reg08,
+        self.write_register_old(Register_old::Reg08, (code_word as u16) & 0x0FFF)?;
+        self.write_register_old(
+            Register_old::Reg08,
             (1u16 << 15) | ((code_word >> 12) as u16 & 0x0FFF),
         )?;
         Ok(())
@@ -355,12 +350,12 @@ where
         } else {
             0x904A
         };
-        self.write_register(Register::Reg51, config)?;
+        self.write_register_old(Register_old::Reg51, config)?;
 
         // REG_07 = mode CTC1 + (freq * 20.64888) for XTAL 13/26M
         // C: (((FreqControlWord * 206488u) + 50000u) / 100000u)
         let word = (((freq_0p1_hz * 206_488u32) + 50_000u32) / 100_000u32) as u16;
-        self.write_register(Register::Reg07, REG_07_MODE_CTC1 | word)?;
+        self.write_register_old(Register_old::Reg07, REG_07_MODE_CTC1 | word)?;
         Ok(())
     }
 
@@ -368,7 +363,7 @@ where
     pub fn set_tail_detection_10hz(&mut self, freq_10hz: u32) -> Result<(), BUS::Error> {
         // C: (253910 + freq/2) / freq
         let word = ((253_910u32 + (freq_10hz / 2)) / freq_10hz) as u16;
-        self.write_register(Register::Reg07, REG_07_MODE_CTC2 | word)
+        self.write_register_old(Register_old::Reg07, REG_07_MODE_CTC2 | word)
     }
 
     // --- VOX ----------------------------------------------------------------
@@ -379,17 +374,17 @@ where
         enable_threshold: u16,
         disable_threshold: u16,
     ) -> Result<(), BUS::Error> {
-        let reg31 = self.read_register(Register::Reg31)?;
-        self.write_register(Register::Reg46, 0xA000 | (enable_threshold & 0x07FF))?;
-        self.write_register(Register::Reg79, 0x1800 | (disable_threshold & 0x07FF))?;
-        self.write_register(Register::Reg7A, 0x289A)?; // disable delay ~= 640ms
-        self.write_register(Register::Reg31, reg31 | (1u16 << 2))
+        let reg31 = self.read_register_old(Register_old::Reg31)?;
+        self.write_register_old(Register_old::Reg46, 0xA000 | (enable_threshold & 0x07FF))?;
+        self.write_register_old(Register_old::Reg79, 0x1800 | (disable_threshold & 0x07FF))?;
+        self.write_register_old(Register_old::Reg7A, 0x289A)?; // disable delay ~= 640ms
+        self.write_register_old(Register_old::Reg31, reg31 | (1u16 << 2))
     }
 
     /// Port of `BK4819_DisableVox()`.
     pub fn disable_vox(&mut self) -> Result<(), BUS::Error> {
-        let v = self.read_register(Register::Reg31)?;
-        self.write_register(Register::Reg31, v & 0xFFFB)
+        let v = self.read_register_old(Register_old::Reg31)?;
+        self.write_register_old(Register_old::Reg31, v & 0xFFFB)
     }
 
     // --- Bandwidth / PA / Frequency ----------------------------------------
@@ -424,7 +419,7 @@ where
             }
             FilterBandwidth::U1k7 => (1u16 << 6) | (1u16 << 4) | (1u16 << 3),
         };
-        self.write_register(Register::Reg43, val)
+        self.write_register_old(Register_old::Reg43, val)
     }
 
     /// Port of `BK4819_SetupPowerAmplifier(bias, frequency)`.
@@ -436,8 +431,8 @@ where
             (4u8 << 3) | 2u8
         };
         let enable: u8 = 1;
-        self.write_register(
-            Register::Reg36,
+        self.write_register_old(
+            Register_old::Reg36,
             ((bias as u16) << 8) | ((enable as u16) << 7) | (gain as u16),
         )
     }
@@ -478,37 +473,29 @@ where
 
     /// Port of `BK4819_SetupSquelch(...)`.
     #[allow(clippy::too_many_arguments)]
-    pub fn setup_squelch(
-        &mut self,
-        open_rssi_thresh: u8,
-        close_rssi_thresh: u8,
-        open_noise_thresh: u8,
-        close_noise_thresh: u8,
-        close_glitch_thresh: u8,
-        open_glitch_thresh: u8,
-    ) -> Result<(), BUS::Error> {
+    pub fn setup_squelch(&mut self, thresholds: SquelchThresholds) -> Result<(), BUS::Error> {
         // Disable tones
-        self.write_register(Register::Reg70, 0)?;
+        self.write_register_old(Register_old::Reg70, 0)?;
 
         // Glitch threshold for squelch close
-        self.write_register(Register::Reg4D, 0xA000 | close_glitch_thresh as u16)?;
+        self.write_register_old(Register_old::Reg4D, 0xA000 | thresholds.close_glitch as u16)?;
 
         // Squelch open/close delay + glitch open threshold
-        self.write_register(
-            Register::Reg4E,
-            (1u16 << 14) | (5u16 << 11) | (6u16 << 9) | open_glitch_thresh as u16,
+        self.write_register_old(
+            Register_old::Reg4E,
+            (1u16 << 14) | (5u16 << 11) | (6u16 << 9) | thresholds.open_glitch as u16,
         )?;
 
         // Ex-noise close/open
-        self.write_register(
-            Register::Reg4F,
-            ((close_noise_thresh as u16) << 8) | (open_noise_thresh as u16),
+        self.write_register_old(
+            Register_old::Reg4F,
+            ((thresholds.close_noise as u16) << 8) | (thresholds.open_noise as u16),
         )?;
 
         // RSSI open/close (0.5dB/step)
-        self.write_register(
-            Register::Reg78,
-            ((open_rssi_thresh as u16) << 8) | (close_rssi_thresh as u16),
+        self.write_register_old(
+            Register_old::Reg78,
+            ((thresholds.open_rssi as u16) << 8) | (thresholds.close_rssi as u16),
         )?;
 
         self.set_af(AfType::Mute)?;
@@ -517,18 +504,18 @@ where
 
     /// Port of `BK4819_SetAF(AF)`.
     pub fn set_af(&mut self, af: AfType) -> Result<(), BUS::Error> {
-        self.write_register(
-            Register::Reg47,
+        self.write_register_old(
+            Register_old::Reg47,
             (6u16 << 12) | ((af as u16) << 8) | (1u16 << 6),
         )
     }
 
     /// Port of `BK4819_RX_TurnOn()`.
     pub fn rx_turn_on(&mut self) -> Result<(), BUS::Error> {
-        self.write_register(Register::Reg37, 0x1F0F)?;
-        self.write_register(Register::Reg30, 0x0000)?;
-        self.write_register(
-            Register::Reg30,
+        self.write_register_old(Register_old::Reg37, 0x1F0F)?;
+        self.write_register_old(Register_old::Reg30, 0x0000)?;
+        self.write_register_old(
+            Register_old::Reg30,
             REG_30_ENABLE_VCO_CALIB
                 | REG_30_DISABLE_UNKNOWN
                 | REG_30_ENABLE_RX_LINK
@@ -545,24 +532,27 @@ where
     // --- Scramble / Compander ----------------------------------------------
 
     pub fn disable_scramble(&mut self) -> Result<(), BUS::Error> {
-        let v = self.read_register(Register::Reg31)?;
-        self.write_register(Register::Reg31, v & !(1u16 << 1))
+        let v = self.read_register_old(Register_old::Reg31)?;
+        self.write_register_old(Register_old::Reg31, v & !(1u16 << 1))
     }
 
     pub fn enable_scramble(&mut self, ty: u8) -> Result<(), BUS::Error> {
-        let v = self.read_register(Register::Reg31)?;
-        self.write_register(Register::Reg31, v | (1u16 << 1))?;
-        self.write_register(Register::Reg71, 0x68DCu16.wrapping_add((ty as u16) * 1032))
+        let v = self.read_register_old(Register_old::Reg31)?;
+        self.write_register_old(Register_old::Reg31, v | (1u16 << 1))?;
+        self.write_register_old(
+            Register_old::Reg71,
+            0x68DCu16.wrapping_add((ty as u16) * 1032),
+        )
     }
 
     pub fn compander_enabled(&mut self) -> Result<bool, BUS::Error> {
-        Ok((self.read_register(Register::Reg31)? & (1u16 << 3)) != 0)
+        Ok((self.read_register_old(Register_old::Reg31)? & (1u16 << 3)) != 0)
     }
 
     pub fn set_compander(&mut self, mode: CompanderMode) -> Result<(), BUS::Error> {
-        let r31 = self.read_register(Register::Reg31)?;
+        let r31 = self.read_register_old(Register_old::Reg31)?;
         if mode == CompanderMode::Off {
-            self.write_register(Register::Reg31, r31 & !(1u16 << 3))?;
+            self.write_register_old(Register_old::Reg31, r31 & !(1u16 << 3))?;
             return Ok(());
         }
 
@@ -573,8 +563,8 @@ where
         };
         let compress_0db: u16 = 86;
         let compress_noise_db: u16 = 64;
-        self.write_register(
-            Register::Reg29,
+        self.write_register_old(
+            Register_old::Reg29,
             (compress_ratio << 14) | (compress_0db << 7) | compress_noise_db,
         )?;
 
@@ -585,25 +575,25 @@ where
         };
         let expand_0db: u16 = 86;
         let expand_noise_db: u16 = 56;
-        self.write_register(
-            Register::Reg28,
+        self.write_register_old(
+            Register_old::Reg28,
             (expand_ratio << 14) | (expand_0db << 7) | expand_noise_db,
         )?;
 
-        self.write_register(Register::Reg31, r31 | (1u16 << 3))
+        self.write_register_old(Register_old::Reg31, r31 | (1u16 << 3))
     }
 
     // --- DTMF ---------------------------------------------------------------
 
     pub fn disable_dtmf(&mut self) -> Result<(), BUS::Error> {
-        self.write_register(Register::Reg24, 0)
+        self.write_register_old(Register_old::Reg24, 0)
     }
 
     pub fn enable_dtmf(&mut self) -> Result<(), BUS::Error> {
-        self.write_register(Register::Reg21, 0x06D8)?;
+        self.write_register_old(Register_old::Reg21, 0x06D8)?;
         let threshold: u16 = 130;
-        self.write_register(
-            Register::Reg24,
+        self.write_register_old(
+            Register_old::Reg24,
             (1u16 << REG_24_SHIFT_UNKNOWN_15)
                 | (threshold << REG_24_SHIFT_THRESHOLD)
                 | (1u16 << REG_24_SHIFT_UNKNOWN_6)
@@ -651,8 +641,8 @@ where
             // C uses 103244/10000 scaling here (different from scale_freq()).
             let w1 = (((p.t1 as u32) * 103_244u32) + 5_000u32) / 10_000u32;
             let w2 = (((p.t2 as u32) * 103_244u32) + 5_000u32) / 10_000u32;
-            self.write_register(Register::Reg71, w1 as u16)?;
-            self.write_register(Register::Reg72, w2 as u16)?;
+            self.write_register_old(Register_old::Reg71, w1 as u16)?;
+            self.write_register_old(Register_old::Reg72, w2 as u16)?;
         }
         Ok(())
     }
@@ -667,8 +657,8 @@ where
         } else {
             AfType::Mute
         })?;
-        self.write_register(
-            Register::Reg70,
+        self.write_register_old(
+            Register_old::Reg70,
             REG_70_ENABLE_TONE1
                 | (DTMF_TONE1_GAIN << REG_70_SHIFT_TONE1_TUNING_GAIN)
                 | REG_70_ENABLE_TONE2
@@ -680,9 +670,9 @@ where
     pub fn exit_dtmf_tx(&mut self, keep_muted: bool) -> Result<(), BUS::Error> {
         self.enter_tx_mute()?;
         self.set_af(AfType::Mute)?;
-        self.write_register(Register::Reg70, 0x0000)?;
+        self.write_register_old(Register_old::Reg70, 0x0000)?;
         self.disable_dtmf()?;
-        self.write_register(Register::Reg30, 0xC1FE)?;
+        self.write_register_old(Register_old::Reg30, 0xC1FE)?;
         if !keep_muted {
             self.exit_tx_mute()?;
         }
@@ -722,17 +712,17 @@ where
     // --- Tone / TX link / mute ---------------------------------------------
 
     pub fn enter_tx_mute(&mut self) -> Result<(), BUS::Error> {
-        self.write_register(Register::Reg50, 0xBB20)
+        self.write_register_old(Register_old::Reg50, 0xBB20)
     }
 
     pub fn exit_tx_mute(&mut self) -> Result<(), BUS::Error> {
-        self.write_register(Register::Reg50, 0x3B20)
+        self.write_register_old(Register_old::Reg50, 0x3B20)
     }
 
     /// Port of `BK4819_EnableTXLink()`.
     pub fn enable_tx_link(&mut self) -> Result<(), BUS::Error> {
-        self.write_register(
-            Register::Reg30,
+        self.write_register_old(
+            Register_old::Reg30,
             REG_30_ENABLE_VCO_CALIB
                 | REG_30_ENABLE_UNKNOWN
                 | REG_30_DISABLE_RX_LINK
@@ -758,14 +748,14 @@ where
 
         let gain: u16 = if !tuning_gain_switch { 96 } else { 28 };
         cfg |= gain << REG_70_SHIFT_TONE1_TUNING_GAIN;
-        self.write_register(Register::Reg70, cfg)?;
+        self.write_register_old(Register_old::Reg70, cfg)?;
 
-        self.write_register(Register::Reg30, 0x0000)?;
-        self.write_register(
-            Register::Reg30,
+        self.write_register_old(Register_old::Reg30, 0x0000)?;
+        self.write_register_old(
+            Register_old::Reg30,
             REG_30_ENABLE_AF_DAC | REG_30_ENABLE_DISC_MODE | REG_30_ENABLE_TX_DSP,
         )?;
-        self.write_register(Register::Reg71, Self::scale_freq(frequency_hz))
+        self.write_register_old(Register_old::Reg71, Self::scale_freq(frequency_hz))
     }
 
     /// Port of `BK4819_PlaySingleTone(...)`.
@@ -786,15 +776,15 @@ where
             self.set_af(AfType::Mute)?;
         }
 
-        self.write_register(
-            Register::Reg70,
+        self.write_register_old(
+            Register_old::Reg70,
             REG_70_ENABLE_TONE1 | (((level & 0x7F) as u16) << REG_70_SHIFT_TONE1_TUNING_GAIN),
         )?;
 
         self.enable_tx_link()?;
         delay.delay_ms(50);
 
-        self.write_register(Register::Reg71, Self::scale_freq(tone_hz as u16))?;
+        self.write_register_old(Register_old::Reg71, Self::scale_freq(tone_hz as u16))?;
         self.exit_tx_mute()?;
 
         delay.delay_ms(delay_ms);
@@ -805,8 +795,8 @@ where
             self.set_af(AfType::Mute)?;
         }
 
-        self.write_register(Register::Reg70, 0x0000)?;
-        self.write_register(Register::Reg30, 0xC1FE)?;
+        self.write_register_old(Register_old::Reg70, 0x0000)?;
+        self.write_register_old(Register_old::Reg30, 0xC1FE)?;
         self.exit_tx_mute()
     }
 
@@ -818,11 +808,11 @@ where
         delay: &mut D,
     ) -> Result<(), BUS::Error> {
         self.enter_tx_mute()?;
-        self.write_register(
-            Register::Reg70,
+        self.write_register_old(
+            Register_old::Reg70,
             REG_70_ENABLE_TONE1 | (66u16 << REG_70_SHIFT_TONE1_TUNING_GAIN),
         )?;
-        self.write_register(Register::Reg71, Self::scale_freq(frequency_hz as u16))?;
+        self.write_register_old(Register_old::Reg71, Self::scale_freq(frequency_hz as u16))?;
         self.set_af(if local_loopback {
             AfType::Beep
         } else {
@@ -836,21 +826,21 @@ where
     // --- Power states -------------------------------------------------------
 
     pub fn sleep(&mut self) -> Result<(), BUS::Error> {
-        self.write_register(Register::Reg30, 0x0000)?;
-        self.write_register(Register::Reg37, 0x1D00)
+        self.write_register_old(Register_old::Reg30, 0x0000)?;
+        self.write_register_old(Register_old::Reg37, 0x1D00)
     }
 
     pub fn idle(&mut self) -> Result<(), BUS::Error> {
-        self.write_register(Register::Reg30, 0x0000)
+        self.write_register_old(Register_old::Reg30, 0x0000)
     }
 
     pub fn turns_off_tones_turns_on_rx(&mut self) -> Result<(), BUS::Error> {
-        self.write_register(Register::Reg70, 0x0000)?;
+        self.write_register_old(Register_old::Reg70, 0x0000)?;
         self.set_af(AfType::Mute)?;
         self.exit_tx_mute()?;
-        self.write_register(Register::Reg30, 0x0000)?;
-        self.write_register(
-            Register::Reg30,
+        self.write_register_old(Register_old::Reg30, 0x0000)?;
+        self.write_register_old(
+            Register_old::Reg30,
             REG_30_ENABLE_VCO_CALIB
                 | REG_30_ENABLE_RX_LINK
                 | REG_30_ENABLE_AF_DAC
@@ -862,8 +852,11 @@ where
 
     pub fn exit_bypass(&mut self) -> Result<(), BUS::Error> {
         self.set_af(AfType::Mute)?;
-        let reg_val = self.read_register(Register::Reg7E)?;
-        self.write_register(Register::Reg7E, (reg_val & !(0b111u16 << 3)) | (5u16 << 3))
+        let reg_val = self.read_register_old(Register_old::Reg7E)?;
+        self.write_register_old(
+            Register_old::Reg7E,
+            (reg_val & !(0b111u16 << 3)) | (5u16 << 3),
+        )
     }
 
     pub fn prepare_transmit(&mut self) -> Result<(), BUS::Error> {
@@ -873,14 +866,14 @@ where
     }
 
     pub fn tx_on_beep(&mut self) -> Result<(), BUS::Error> {
-        self.write_register(Register::Reg37, 0x1D0F)?;
-        self.write_register(Register::Reg52, 0x028F)?;
-        self.write_register(Register::Reg30, 0x0000)?;
-        self.write_register(Register::Reg30, 0xC1FE)
+        self.write_register_old(Register_old::Reg37, 0x1D0F)?;
+        self.write_register_old(Register_old::Reg52, 0x028F)?;
+        self.write_register_old(Register_old::Reg30, 0x0000)?;
+        self.write_register_old(Register_old::Reg30, 0xC1FE)
     }
 
     pub fn exit_sub_au(&mut self) -> Result<(), BUS::Error> {
-        self.write_register(Register::Reg51, 0x0000)
+        self.write_register_old(Register_old::Reg51, 0x0000)
     }
 
     pub fn conditional_rx_turn_on_and_gpio0_enable(&mut self) -> Result<(), BUS::Error> {
@@ -895,11 +888,11 @@ where
 
     pub fn gen_tail(&mut self, tail: u8) -> Result<(), BUS::Error> {
         match tail {
-            0 => self.write_register(Register::Reg52, 0x828F)?,
-            1 => self.write_register(Register::Reg52, 0xA28F)?,
-            2 => self.write_register(Register::Reg52, 0xC28F)?,
-            3 => self.write_register(Register::Reg52, 0xE28F)?,
-            4 => self.write_register(Register::Reg07, 0x046F)?,
+            0 => self.write_register_old(Register_old::Reg52, 0x828F)?,
+            1 => self.write_register_old(Register_old::Reg52, 0xA28F)?,
+            2 => self.write_register_old(Register_old::Reg52, 0xC28F)?,
+            3 => self.write_register_old(Register_old::Reg52, 0xE28F)?,
+            4 => self.write_register_old(Register_old::Reg07, 0x046F)?,
             _ => {}
         }
         Ok(())
@@ -907,19 +900,24 @@ where
 
     pub fn play_cdcss_tail(&mut self) -> Result<(), BUS::Error> {
         self.gen_tail(0)?;
-        self.write_register(Register::Reg51, 0x804A)
+        self.write_register_old(Register_old::Reg51, 0x804A)
     }
 
     pub fn play_ctcss_tail(&mut self) -> Result<(), BUS::Error> {
         // C uses optional phase shift; default is 55Hz
         self.gen_tail(4)?;
-        self.write_register(Register::Reg51, 0x904A)
+        self.write_register_old(Register_old::Reg51, 0x904A)
     }
 
     // --- Indicators / measurements -----------------------------------------
 
     pub fn get_rssi(&mut self) -> Result<u16, BUS::Error> {
-        Ok(self.read_register(Register::Reg67)? & 0x01FF)
+        let r67 = Register::Reg67(Reg67::new()).read(self)?;
+        if let Register::Reg67(r) = r67 {
+            Ok(r.rssi())
+        } else {
+            panic!();
+        }
     }
 
     pub fn get_rssi_dbm(&mut self) -> Result<i16, BUS::Error> {
@@ -928,24 +926,24 @@ where
     }
 
     pub fn get_glitch_indicator(&mut self) -> Result<u8, BUS::Error> {
-        Ok((self.read_register(Register::Reg63)? & 0x00FF) as u8)
+        Ok((self.read_register_old(Register_old::Reg63)? & 0x00FF) as u8)
     }
 
     pub fn get_ex_noise_indicator(&mut self) -> Result<u8, BUS::Error> {
-        Ok((self.read_register(Register::Reg65)? & 0x007F) as u8)
+        Ok((self.read_register_old(Register_old::Reg65)? & 0x007F) as u8)
     }
 
     pub fn get_voice_amplitude_out(&mut self) -> Result<u16, BUS::Error> {
-        self.read_register(Register::Reg64)
+        self.read_register_old(Register_old::Reg64)
     }
 
     pub fn get_af_tx_rx(&mut self) -> Result<u8, BUS::Error> {
-        Ok((self.read_register(Register::Reg6F)? & 0x003F) as u8)
+        Ok((self.read_register_old(Register_old::Reg6F)? & 0x003F) as u8)
     }
 
     /// Port of `BK4819_GetRxGain_dB()`.
     pub fn get_rx_gain_db(&mut self) -> Result<i8, BUS::Error> {
-        let reg7e = self.read_register(Register::Reg7E)?;
+        let reg7e = self.read_register_old(Register_old::Reg7E)?;
         let gain_idx_raw = ((reg7e >> 12) & 0x7) as i8;
         let gain_idx = if gain_idx_raw >= 4 {
             gain_idx_raw - 8
@@ -954,9 +952,9 @@ where
         };
 
         let gain_reg_addr: u8 = if gain_idx < 0 {
-            Register::Reg14.as_u8()
+            Register_old::Reg14.as_u8()
         } else {
-            (Register::Reg10.as_u8()).wrapping_add(gain_idx as u8)
+            (Register_old::Reg10.as_u8()).wrapping_add(gain_idx as u8)
         };
         let agc_gain_reg = self.bk.read_reg(gain_reg_addr)?;
 
@@ -976,25 +974,25 @@ where
     // --- Scan ---------------------------------------------------------------
 
     pub fn get_frequency_scan_result(&mut self) -> Result<Option<u32>, BUS::Error> {
-        let high = self.read_register(Register::Reg0D)?;
+        let high = self.read_register_old(Register_old::Reg0D)?;
         let finished = (high & 0x8000) == 0;
         if !finished {
             return Ok(None);
         }
-        let low = self.read_register(Register::Reg0E)?;
+        let low = self.read_register_old(Register_old::Reg0E)?;
         Ok(Some(((high as u32 & 0x7FF) << 16) | (low as u32)))
     }
 
     pub fn get_cxcss_scan_result(&mut self) -> Result<(CssScanResult, u32, u16), BUS::Error> {
         // returns (kind, cdcss_word, ctcss_freq_hz_x10)
-        let high = self.read_register(Register::Reg69)?;
+        let high = self.read_register_old(Register_old::Reg69)?;
         if (high & 0x8000) == 0 {
-            let low = self.read_register(Register::Reg6A)?;
+            let low = self.read_register_old(Register_old::Reg6A)?;
             let cdcss = (((high & 0x0FFF) as u32) << 12) | ((low & 0x0FFF) as u32);
             return Ok((CssScanResult::Cdcss, cdcss, 0));
         }
 
-        let low = self.read_register(Register::Reg68)?;
+        let low = self.read_register_old(Register_old::Reg68)?;
         if (low & 0x8000) == 0 {
             let ctcss_hz_x10 = (((low & 0x1FFF) as u32) * 4843u32) / 10_000u32;
             return Ok((CssScanResult::Ctcss, 0, ctcss_hz_x10 as u16));
@@ -1004,17 +1002,17 @@ where
     }
 
     pub fn disable_frequency_scan(&mut self) -> Result<(), BUS::Error> {
-        self.write_register(Register::Reg32, 290u16 << 1)
+        self.write_register_old(Register_old::Reg32, 290u16 << 1)
     }
 
     pub fn enable_frequency_scan(&mut self) -> Result<(), BUS::Error> {
-        self.write_register(Register::Reg32, (290u16 << 1) | 1u16)
+        self.write_register_old(Register_old::Reg32, (290u16 << 1) | 1u16)
     }
 
     pub fn set_scan_frequency_10hz(&mut self, frequency_10hz: u32) -> Result<(), BUS::Error> {
         self.set_frequency(frequency_10hz)?;
-        self.write_register(
-            Register::Reg51,
+        self.write_register_old(
+            Register_old::Reg51,
             REG_51_DISABLE_CXCSS
                 | REG_51_GPIO6_PIN2_NORMAL
                 | REG_51_TX_CDCSS_POSITIVE
@@ -1028,7 +1026,7 @@ where
     }
 
     pub fn disable(&mut self) -> Result<(), BUS::Error> {
-        self.write_register(Register::Reg30, 0x0000)
+        self.write_register_old(Register_old::Reg30, 0x0000)
     }
 
     pub fn stop_scan(&mut self) -> Result<(), BUS::Error> {
@@ -1039,26 +1037,26 @@ where
     // --- Misc getters -------------------------------------------------------
 
     pub fn get_dtmf_5tone_code(&mut self) -> Result<u8, BUS::Error> {
-        Ok(((self.read_register(Register::Reg0B)? >> 8) & 0x0F) as u8)
+        Ok(((self.read_register_old(Register_old::Reg0B)? >> 8) & 0x0F) as u8)
     }
 
     pub fn get_cdcss_code_type(&mut self) -> Result<u8, BUS::Error> {
-        Ok(((self.read_register(Register::Reg0C)? >> 14) & 0x03) as u8)
+        Ok(((self.read_register_old(Register_old::Reg0C)? >> 14) & 0x03) as u8)
     }
 
     pub fn get_ctc_shift(&mut self) -> Result<u8, BUS::Error> {
-        Ok(((self.read_register(Register::Reg0C)? >> 12) & 0x03) as u8)
+        Ok(((self.read_register_old(Register_old::Reg0C)? >> 12) & 0x03) as u8)
     }
 
     pub fn get_ctc_type(&mut self) -> Result<u8, BUS::Error> {
-        Ok(((self.read_register(Register::Reg0C)? >> 10) & 0x03) as u8)
+        Ok(((self.read_register_old(Register_old::Reg0C)? >> 10) & 0x03) as u8)
     }
 
     // --- FSK ---------------------------------------------------------------
 
     pub fn reset_fsk<D: DelayNs>(&mut self, delay: &mut D) -> Result<(), BUS::Error> {
-        self.write_register(Register::Reg3F, 0x0000)?;
-        self.write_register(Register::Reg59, 0x0068)?;
+        self.write_register_old(Register_old::Reg3F, 0x0000)?;
+        self.write_register_old(Register_old::Reg59, 0x0068)?;
         delay.delay_ms(30);
         self.idle()
     }
@@ -1071,19 +1069,19 @@ where
     ) -> Result<(), BUS::Error> {
         let n = min(data_words.len(), 36);
         delay.delay_ms(20);
-        self.write_register(Register::Reg3F, 1u16 << 15)?; // FSK TX finished interrupt
-        self.write_register(Register::Reg59, 0x8068)?;
-        self.write_register(Register::Reg59, 0x0068)?;
+        self.write_register_old(Register_old::Reg3F, 1u16 << 15)?; // FSK TX finished interrupt
+        self.write_register_old(Register_old::Reg59, 0x8068)?;
+        self.write_register_old(Register_old::Reg59, 0x0068)?;
         for &w in data_words.iter().take(n) {
-            self.write_register(Register::Reg5F, w)?;
+            self.write_register_old(Register_old::Reg5F, w)?;
         }
         delay.delay_ms(20);
-        self.write_register(Register::Reg59, 0x2868)?;
+        self.write_register_old(Register_old::Reg59, 0x2868)?;
 
         // crude timeout loop (matches C behavior)
         let mut timeout: u8 = 200;
         while timeout > 0 {
-            let r0c = self.read_register(Register::Reg0C)?;
+            let r0c = self.read_register_old(Register_old::Reg0C)?;
             if (r0c & 1u16) != 0 {
                 break;
             }
@@ -1091,25 +1089,25 @@ where
             delay.delay_ms(5);
         }
 
-        self.write_register(Register::Reg02, 0x0000)?;
+        self.write_register_old(Register_old::Reg02, 0x0000)?;
         delay.delay_ms(20);
         self.reset_fsk(delay)
     }
 
     pub fn prepare_fsk_receive(&mut self) -> Result<(), BUS::Error> {
         // Mirror C ordering (minus delays handled externally if needed).
-        self.write_register(Register::Reg3F, 0x0000)?;
-        self.write_register(Register::Reg59, 0x0068)?;
+        self.write_register_old(Register_old::Reg3F, 0x0000)?;
+        self.write_register_old(Register_old::Reg59, 0x0068)?;
         self.idle()?;
-        self.write_register(Register::Reg02, 0x0000)?;
-        self.write_register(Register::Reg3F, 0x0000)?;
+        self.write_register_old(Register_old::Reg02, 0x0000)?;
+        self.write_register_old(Register_old::Reg3F, 0x0000)?;
         self.rx_turn_on()?;
         // Enable FSK RX finished + FIFO almost full
-        self.write_register(Register::Reg3F, (1u16 << 13) | (1u16 << 12))?;
+        self.write_register_old(Register_old::Reg3F, (1u16 << 13) | (1u16 << 12))?;
         // Clear RX FIFO + preamble len 7 bytes
-        self.write_register(Register::Reg59, 0x4068)?;
+        self.write_register_old(Register_old::Reg59, 0x4068)?;
         // Enable FSK scramble + RX
-        self.write_register(Register::Reg59, 0x3068)?;
+        self.write_register_old(Register_old::Reg59, 0x3068)?;
         Ok(())
     }
 
@@ -1133,25 +1131,25 @@ where
 
         self.enter_tx_mute()?;
         self.set_af(AfType::Mute)?;
-        self.write_register(
-            Register::Reg70,
+        self.write_register_old(
+            Register_old::Reg70,
             REG_70_ENABLE_TONE1 | (66u16 << REG_70_SHIFT_TONE1_TUNING_GAIN),
         )?;
         self.enable_tx_link()?;
         delay.delay_ms(50);
 
-        self.write_register(Register::Reg71, Self::scale_freq(tone1_hz as u16))?;
+        self.write_register_old(Register_old::Reg71, Self::scale_freq(tone1_hz as u16))?;
         self.exit_tx_mute()?;
         delay.delay_ms(80);
         self.enter_tx_mute()?;
 
-        self.write_register(Register::Reg71, Self::scale_freq(tone2_hz as u16))?;
+        self.write_register_old(Register_old::Reg71, Self::scale_freq(tone2_hz as u16))?;
         self.exit_tx_mute()?;
         delay.delay_ms(80);
         self.enter_tx_mute()?;
 
-        self.write_register(Register::Reg70, 0x0000)?;
-        self.write_register(Register::Reg30, 0xC1FE)?;
+        self.write_register_old(Register_old::Reg70, 0x0000)?;
+        self.write_register_old(Register_old::Reg30, 0xC1FE)?;
         Ok(())
     }
 
@@ -1160,46 +1158,46 @@ where
 
         self.set_af(AfType::Mute)?;
         // RogerMDC_Configuration table from C
-        self.write_register(Register::Reg58, 0x37C3)?;
-        self.write_register(Register::Reg72, 0x3065)?;
-        self.write_register(Register::Reg70, 0x00E0)?;
-        self.write_register(Register::Reg5D, 0x0D00)?;
-        self.write_register(Register::Reg59, 0x8068)?;
-        self.write_register(Register::Reg59, 0x0068)?;
-        self.write_register(Register::Reg5A, 0x5555)?;
-        self.write_register(Register::Reg5B, 0x55AA)?;
-        self.write_register(Register::Reg5C, 0xAA30)?;
+        self.write_register_old(Register_old::Reg58, 0x37C3)?;
+        self.write_register_old(Register_old::Reg72, 0x3065)?;
+        self.write_register_old(Register_old::Reg70, 0x00E0)?;
+        self.write_register_old(Register_old::Reg5D, 0x0D00)?;
+        self.write_register_old(Register_old::Reg59, 0x8068)?;
+        self.write_register_old(Register_old::Reg59, 0x0068)?;
+        self.write_register_old(Register_old::Reg5A, 0x5555)?;
+        self.write_register_old(Register_old::Reg5B, 0x55AA)?;
+        self.write_register_old(Register_old::Reg5C, 0xAA30)?;
 
         for &w in &FSK_ROGER_TABLE {
-            self.write_register(Register::Reg5F, w)?;
+            self.write_register_old(Register_old::Reg5F, w)?;
         }
         delay.delay_ms(20);
 
-        self.write_register(Register::Reg59, 0x0868)?; // enable FSK TX
+        self.write_register_old(Register_old::Reg59, 0x0868)?; // enable FSK TX
         delay.delay_ms(180);
 
-        self.write_register(Register::Reg59, 0x0068)?;
-        self.write_register(Register::Reg70, 0x0000)?;
-        self.write_register(Register::Reg58, 0x0000)?;
+        self.write_register_old(Register_old::Reg59, 0x0068)?;
+        self.write_register_old(Register_old::Reg70, 0x0000)?;
+        self.write_register_old(Register_old::Reg58, 0x0000)?;
         Ok(())
     }
 
     // --- Small helpers mirroring the C "utility" funcs ----------------------
 
     pub fn enable_af_dac_disc_mode_tx_dsp(&mut self) -> Result<(), BUS::Error> {
-        self.write_register(Register::Reg30, 0x0000)?;
-        self.write_register(Register::Reg30, 0x0302)
+        self.write_register_old(Register_old::Reg30, 0x0000)?;
+        self.write_register_old(Register_old::Reg30, 0x0302)
     }
 
     pub fn get_vox_amp(&mut self) -> Result<u16, BUS::Error> {
-        Ok(self.read_register(Register::Reg64)? & 0x7FFF)
+        Ok(self.read_register_old(Register_old::Reg64)? & 0x7FFF)
     }
 
     pub fn set_scramble_frequency_control_word(
         &mut self,
         frequency_hz: u32,
     ) -> Result<(), BUS::Error> {
-        self.write_register(Register::Reg71, Self::scale_freq(frequency_hz as u16))
+        self.write_register_old(Register_old::Reg71, Self::scale_freq(frequency_hz as u16))
     }
 
     pub fn play_dtmf_ex<D: DelayNs>(
@@ -1221,12 +1219,12 @@ where
 
     /// Convenience: set scan tone generator to CDCSS baudrate (C uses REG_07 MODE_CDCSS).
     pub fn set_cdcss_baud_control_word(&mut self, word: u16) -> Result<(), BUS::Error> {
-        self.write_register(Register::Reg07, REG_07_MODE_CDCSS | (word & 0x1FFF))
+        self.write_register_old(Register_old::Reg07, REG_07_MODE_CDCSS | (word & 0x1FFF))
     }
 
     /// Convenience: force CxCSS off (as in `BK4819_ExitSubAu()` and scan setup).
     pub fn disable_cxcss(&mut self) -> Result<(), BUS::Error> {
-        self.write_register(Register::Reg51, 0x0000)
+        self.write_register_old(Register_old::Reg51, 0x0000)
     }
 
     /// Convenience: set CTCSS mode with given TX gain1 value.
@@ -1237,8 +1235,8 @@ where
         } else {
             REG_51_1050HZ_NO_DETECTION
         };
-        self.write_register(
-            Register::Reg51,
+        self.write_register_old(
+            Register_old::Reg51,
             REG_51_ENABLE_CXCSS
                 | REG_51_GPIO6_PIN2_NORMAL
                 | REG_51_TX_CDCSS_POSITIVE

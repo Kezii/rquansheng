@@ -8,7 +8,7 @@
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct RegisterSpec {
     pub name: &'static str,
-    pub num: Register,
+    pub num: Register_old,
     pub offset: u8,
     pub mask: u16,
     pub inc: u16,
@@ -16,7 +16,7 @@ pub struct RegisterSpec {
 
 pub const AFC_DISABLE: RegisterSpec = RegisterSpec {
     name: "AFC Disable",
-    num: Register::Reg73,
+    num: Register_old::Reg73,
     offset: 4,
     mask: 1,
     inc: 1,
@@ -24,7 +24,7 @@ pub const AFC_DISABLE: RegisterSpec = RegisterSpec {
 
 pub const AF_OUT_SELECT: RegisterSpec = RegisterSpec {
     name: "AF Output Select",
-    num: Register::Reg47,
+    num: Register_old::Reg47,
     offset: 8,
     mask: 0xF,
     inc: 1,
@@ -32,7 +32,7 @@ pub const AF_OUT_SELECT: RegisterSpec = RegisterSpec {
 
 pub const AF_DAC_GAIN: RegisterSpec = RegisterSpec {
     name: "AF DAC Gain",
-    num: Register::Reg48,
+    num: Register_old::Reg48,
     offset: 0,
     mask: 0xF,
     inc: 1,
@@ -43,7 +43,7 @@ pub const AF_DAC_GAIN: RegisterSpec = RegisterSpec {
 /// Matches the `BK4819_REGISTER_t` enum in the C reference.
 #[repr(u8)]
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub enum Register {
+pub enum Register_old {
     Reg00 = 0x00,
     Reg02 = 0x02,
     Reg06 = 0x06,
@@ -120,7 +120,7 @@ pub enum Register {
     Reg7E = 0x7E,
 }
 
-impl Register {
+impl Register_old {
     #[inline]
     pub const fn as_u8(self) -> u8 {
         self as u8

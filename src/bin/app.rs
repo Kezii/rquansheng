@@ -39,24 +39,6 @@ defmt::timestamp!("{}", {
 
 static SERIAL: StaticCell<dp30g030_hal::uart::Uart1> = StaticCell::new();
 
-#[allow(non_camel_case_types)]
-pub struct FG12864390_FKFW;
-impl DisplaySpecs<128, 64, 8> for FG12864390_FKFW {
-    const FLIP_ROWS: bool = false;
-    const FLIP_COLUMNS: bool = true;
-    const INVERTED: bool = false;
-    const BIAS_MODE_1: bool = false;
-    const POWER_CONTROL: PowerControlMode = PowerControlMode {
-        booster_circuit: true,
-        voltage_regulator_circuit: true,
-        voltage_follower_circuit: true,
-    };
-    const VOLTAGE_REGULATOR_RESISTOR_RATIO: u8 = 0b100; // RR=4
-    const ELECTRONIC_VOLUME: u8 = 31;
-    const BOOSTER_RATIO: BoosterRatio = BoosterRatio::StepUp2x3x4x;
-    const COLUMN_OFFSET: u8 = 4;
-}
-
 // TODO(7) Configure the `rtic::app` macro
 #[rtic::app(
     device = rquansheng::dp30g030_hal,
@@ -66,48 +48,28 @@ impl DisplaySpecs<128, 64, 8> for FG12864390_FKFW {
 )]
 
 mod app {
-    use core::cmp::min;
-
-    use cortex_m::asm;
-    use display_interface_spi::SPIInterface;
-    use embedded_graphics::draw_target::DrawTarget;
-    use embedded_graphics::mono_font::ascii::FONT_8X13_BOLD;
-    use embedded_graphics::mono_font::MonoTextStyle;
-    use embedded_graphics::pixelcolor::BinaryColor;
-    use embedded_graphics::prelude::Size;
     use embedded_graphics::prelude::{Point, Primitive};
     use embedded_graphics::primitives::{PrimitiveStyle, Rectangle};
-    use embedded_graphics::text::Text;
-    use embedded_graphics::Drawable;
-    use embedded_hal::delay::DelayNs;
     use embedded_hal::digital::{InputPin, OutputPin};
     use embedded_hal_bus::spi::ExclusiveDevice;
+    use heapless::String;
     use rquansheng::bk4819::Bk4819Driver;
     use rquansheng::bk4819_bitbang::{Bk4819, Bk4819BitBang, Dp32g030BidiPin};
+    use rquansheng::delay::CycleDelay;
+    use rquansheng::dialer::Dialer;
+    use rquansheng::display::Rendering;
     use rquansheng::dp30g030_hal::adc;
     use rquansheng::dp30g030_hal::gpio::{Input, Output, Pin, Port};
     use rquansheng::dp30g030_hal::spi;
     use rquansheng::dp30g030_hal::uart;
     use rquansheng::keyboard::KeyboardState;
-    use rquansheng::radio::{Config as RadioConfig, RadioController};
+    use rquansheng::radio::{ChannelConfig as RadioConfig, RadioController};
     use rtic_monotonics::{fugit::ExtU32, Monotonic as _};
+    use rtic_sync::signal::{Signal, SignalReader, SignalWriter};
     use st7565::{GraphicsPageBuffer, ST7565};
     use static_cell::StaticCell;
 
-    use crate::{number_to_string, Mono, FG12864390_FKFW};
-
-    static PAGE_BUFFER: StaticCell<GraphicsPageBuffer<128, 8>> = StaticCell::new();
-
-    type DisplaySpiDevice = ExclusiveDevice<spi::Spi0, Pin<Output>, embedded_hal_bus::spi::NoDelay>;
-    type DisplayInterface = SPIInterface<DisplaySpiDevice, Pin<Output>>;
-    type Display = ST7565<
-        DisplayInterface,
-        FG12864390_FKFW,
-        st7565::modes::GraphicsMode<'static, 128, 8>,
-        128,
-        64,
-        8,
-    >;
+    use crate::Mono;
 
     // Shared resources go here
     #[shared]
@@ -115,6 +77,7 @@ mod app {
         radio:
             RadioController<Bk4819BitBang<Pin<Output>, Pin<Output>, Dp32g030BidiPin, CycleDelay>>,
         audio_on: bool,
+        dialer: Dialer,
     }
 
     // Local resources go here
@@ -127,54 +90,15 @@ mod app {
         pin_ptt: Pin<Input>,
         adc: adc::Adc,
         radio_delay: CycleDelay,
-        display: Display,
         keyboard_state: KeyboardState,
-    }
-
-    /// Simple busy-wait delay based on core clock.
-    ///
-    /// This is used only for BK4819 bit-banging (short delays on the order of 1µs).
-    pub struct CycleDelay {
-        cycles_per_us: u32,
-    }
-
-    impl CycleDelay {
-        const fn new(cpu_hz: u32) -> Self {
-            Self {
-                cycles_per_us: cpu_hz / 1_000_000,
-            }
-        }
-
-        #[inline(always)]
-        fn delay_cycles(&mut self, cycles: u32) {
-            // cortex-m busy loop; `0` is fine.
-            asm::delay(cycles);
-        }
-    }
-
-    impl DelayNs for CycleDelay {
-        #[inline]
-        fn delay_ns(&mut self, ns: u32) {
-            // cycles = cpu_hz * ns / 1e9
-            // Round up a bit to avoid being too fast.
-            let cycles = ((self.cycles_per_us as u64) * (ns as u64)).div_ceil(1000);
-            self.delay_cycles(min(cycles, u32::MAX as u64) as u32);
-        }
-
-        #[inline]
-        fn delay_us(&mut self, us: u32) {
-            self.delay_cycles(self.cycles_per_us.saturating_mul(us));
-        }
-
-        #[inline]
-        fn delay_ms(&mut self, ms: u32) {
-            self.delay_us(ms.saturating_mul(1_000));
-        }
+        display: Rendering,
+        display_update_reader: SignalReader<'static, bool>,
+        display_update_writer: SignalWriter<'static, bool>,
     }
 
     // NOTE: BK4819 driver logic has moved to `src/bk4819/`.
 
-    #[init]
+    #[init(local = [poke_display_update: Signal<bool> = Signal::new()])]
     fn init(cx: init::Context) -> (Shared, Local) {
         // TODO setup monotonic if used
         // let sysclk = { /* clock setup + returning sysclk as an u32 */ };
@@ -244,53 +168,10 @@ mod app {
         )
         .unwrap();
 
-        // --- Display (ST7565) -----------------------------------------------------
-        //
-        // Wiring from the reference UV-K5 firmware:
-        // - SPI0: PB8=CLK, PB10=MOSI (PB9 is used as A0/DC, so we run write-only, no MISO)
-        // - CS:   PB7 (we manage it as GPIO; embedded-hal `SpiBus` is bus-only)
-        // - A0/DC: PB9
-        // - RST:  PB11 (shared with SWDIO in stock firmware)
-        let spi0_sck =
-            spi::SckPin::<rquansheng::dp30g030_hal::SPI0>::new(Pin::new(Port::B, 8)).unwrap();
-        let spi0_mosi =
-            spi::MosiPin::<rquansheng::dp30g030_hal::SPI0>::new(Pin::new(Port::B, 10)).unwrap();
-        let spi0_cfg = spi::Config::uvk5_display_default();
-        let spi0: spi::Spi0 = spi::Spi::<
-            rquansheng::dp30g030_hal::SPI0,
-            spi::SckPin<rquansheng::dp30g030_hal::SPI0>,
-            spi::MosiPin<rquansheng::dp30g030_hal::SPI0>,
-            spi::NoMiso,
-        >::new(
-            cx.device.SPI0,
-            &cx.device.SYSCON,
-            &cx.device.PORTCON,
-            spi0_sck,
-            spi0_mosi,
-            spi::NoMiso,
-            spi0_cfg,
-        )
-        .unwrap();
+        let (mut display_update_writer, mut display_update_reader) =
+            cx.local.poke_display_update.split();
 
-        let pin_lcd_cs =
-            Pin::new(Port::B, 7).into_push_pull_output(&cx.device.SYSCON, &cx.device.PORTCON);
-        let pin_lcd_a0 =
-            Pin::new(Port::B, 9).into_push_pull_output(&cx.device.SYSCON, &cx.device.PORTCON);
-        let mut pin_lcd_rst =
-            Pin::new(Port::B, 11).into_push_pull_output(&cx.device.SYSCON, &cx.device.PORTCON);
-
-        let mut disp_delay = CycleDelay::new(48_000_000);
-
-        let disp_spidevice = ExclusiveDevice::new_no_delay(spi0, pin_lcd_cs).unwrap();
-        let disp_interface = SPIInterface::new(disp_spidevice, pin_lcd_a0);
-
-        let page_buffer = PAGE_BUFFER.init(GraphicsPageBuffer::new());
-        let mut display: Display =
-            ST7565::new(disp_interface, FG12864390_FKFW).into_graphics_mode(page_buffer);
-
-        display.reset(&mut pin_lcd_rst, &mut disp_delay).ok();
-        display.set_display_on(true).unwrap();
-        display.flush().unwrap();
+        let display = Rendering::new(cx.device.SPI0, &cx.device.SYSCON, &cx.device.PORTCON);
 
         Mono::start(cx.core.SYST, 48_000_000);
 
@@ -313,6 +194,7 @@ mod app {
                 // Initialization of shared resources go here
                 radio,
                 audio_on: false,
+                dialer: Dialer::new(),
             },
             Local {
                 // Initialization of local resources go here
@@ -325,6 +207,8 @@ mod app {
                 radio_delay: CycleDelay::new(48_000_000),
                 display,
                 keyboard_state,
+                display_update_reader,
+                display_update_writer,
             },
         )
     }
@@ -351,7 +235,7 @@ mod app {
 
             cx.local.pin_flashlight.set_low();
             //cx.local.pin_backlight.set_high();
-            Mono::delay(500.millis()).await;
+            Mono::delay(1500.millis()).await;
         }
     }
 
@@ -368,43 +252,26 @@ mod app {
     }
 
     // Display demo task: updates the ST7565 periodically with a simple pattern.
-    #[task(priority = 1, local = [pin_backlight,display], shared = [radio])]
+    #[task(priority = 1, local = [pin_backlight,display,display_update_reader], shared = [radio, dialer])]
     async fn display_task(mut cx: display_task::Context) {
         cx.local.pin_backlight.set_high();
 
         loop {
-            let frequency = cx.shared.radio.lock(|r| r.cfg.freq);
+            let channel_cfg = cx.shared.radio.lock(|r| r.channel_cfg);
+            let rssi_db = cx.shared.radio.lock(|r| r.bk.get_rssi_dbm().unwrap_or(0));
+            let dialer = cx.shared.dialer.lock(|d| d.clone());
+            cx.local
+                .display
+                .render_main(channel_cfg, rssi_db as f32, &dialer);
 
-            cx.local.display.clear(BinaryColor::Off).unwrap();
-
-            let font = MonoTextStyle::new(&FONT_8X13_BOLD, BinaryColor::On);
-            Text::new("Hello,\nRust!", Point::new(43, 22), font)
-                .draw(cx.local.display)
-                .unwrap();
-
-            // Send content to display
-            cx.local.display.flush().unwrap();
-
-            Rectangle::new(Point::new(41, 11), Size::new(50, 27))
-                .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 2))
-                .draw(cx.local.display)
-                .unwrap();
-
-            Text::new(
-                number_to_string(frequency).as_str(),
-                Point::new(30, 52),
-                font,
-            )
-            .draw(cx.local.display)
-            .unwrap();
-
-            cx.local.display.flush().unwrap();
-            Mono::delay(1000.millis()).await;
+            let left = cx.local.display_update_reader.wait();
+            let right = Mono::delay(1000.millis());
+            embassy_futures::select::select(left, right).await;
         }
     }
 
     /// 10ms tick task: poll+debounce PTT, poll BK4819 interrupts, and update audio.
-    #[task(priority = 1, shared = [radio, audio_on], local = [pin_audio_path, pin_ptt, radio_delay, keyboard_state])]
+    #[task(priority = 1, shared = [radio, audio_on, dialer], local = [pin_audio_path, pin_ptt, radio_delay, keyboard_state,display_update_writer])]
     async fn radio_10ms_task(mut cx: radio_10ms_task::Context) {
         // Simple debounce (like C firmware): require 3 consecutive 10ms samples.
         let mut ptt_last_sample = false;
@@ -461,18 +328,19 @@ mod app {
                     keyboard.get_event(&mut cx.local.keyboard_state, &mut cx.local.radio_delay)
                 {
                     defmt::info!("key pressed: {:?}", key);
+                    cx.shared.dialer.lock(|d| d.eat_keyboard_event(key));
+                    cx.local.display_update_writer.write(true);
                 }
+            }
+
+            if let Some(frequency) = cx.shared.dialer.lock(|d| d.get_frequency()) {
+                defmt::info!("got from dialer frequency: {}", frequency);
+                cx.shared
+                    .radio
+                    .lock(|r| r.channel_cfg.freq = frequency * 1000);
             }
 
             Mono::delay(10.millis()).await;
         }
     }
-}
-
-fn number_to_string(number: u32) -> heapless::String<10> {
-    use core::fmt::Write as _;
-
-    let mut string = heapless::String::new();
-    write!(&mut string, "{}", number).unwrap();
-    string
 }

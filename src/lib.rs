@@ -10,9 +10,13 @@ use panic_probe as _;
 pub mod bk4819;
 pub mod bk4819_bitbang;
 pub mod bk4819_n;
+pub mod delay;
+pub mod dialer;
+pub mod display;
 pub mod dp30g030_hal;
 pub mod keyboard;
 pub mod radio;
+
 use dp32g030 as _;
 
 // same panicking *behavior* as `panic-probe` but doesn't print a panic message
