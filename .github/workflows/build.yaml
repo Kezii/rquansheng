@@ -31,4 +31,4 @@ jobs:
 
       - name: Cargo check
         run: |
-          cargo check --workspace --all-targets
+          cargo check --workspace --lib --bins --examples

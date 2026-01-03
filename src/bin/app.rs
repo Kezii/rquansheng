@@ -21,7 +21,7 @@ struct Uptime {
 
 impl defmt::Format for Uptime {
     fn format(&self, fmt: defmt::Formatter) {
-        defmt::write!(fmt, "{=u32:06}.{=u8:02}s", self.secs, self.csecs);
+        defmt::write!(fmt, "{=u32:06}.{=u8:02}", self.secs, self.csecs);
     }
 }
 
