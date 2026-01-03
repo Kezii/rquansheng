@@ -17,12 +17,24 @@ This is not a black box reimplementation, I'm still using the C code as referenc
 - [x] keyboard driver and events
 - [x] display driver
 - [ ] eeprom driver 
+- [ ] bk4819 hal refactoring (partial)
 
 ## High level
 - [x] fm radio rx
 - [x] fm radio tx
-- [ ] serial protocol for debug logs and remote control
+- [ ] serial protocol for remote control
+- [ ] defmt logs wrapped by the serial protocol
+- [ ] centralized radio state
 - [ ] basic UI for radio state
+- [ ] basic UI for menu
 - [ ] eeprom settings save
-- [ ] basic ui for menu
-- [ ] other modes
+
+
+## In the far future, probably never
+- [ ] AM / SSB
+- [ ] full support for CTCSS / CDCSS etc etc
+- [ ] spectrum analysis
+- [ ] scanning
+- [ ] ARDF
+
+![photo](docs/photo.jpg)
