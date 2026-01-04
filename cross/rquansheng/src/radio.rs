@@ -5,12 +5,17 @@
 //! - Provide a higher-level "radio controller" that manages RX/TX state transitions and
 //!   periodic interrupt polling (as in the reference C firmware).
 
+use embedded_graphics::pixelcolor::BinaryColor;
+use embedded_graphics::prelude::DrawTarget;
 use embedded_hal::delay::DelayNs;
 
 use crate::bk4819::regs::Register_old;
 use crate::bk4819::{AfType, Bk4819Driver, FilterBandwidth, GpioPin};
 use crate::bk4819_bitbang::Bk4819Bus;
 use crate::bk4819_n::{Reg3F, Register};
+use crate::dialer::Dialer;
+use crate::display::RenderingMgr;
+use crate::keyboard::{KeyEvent, KeyboardState};
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum Mode {
@@ -62,18 +67,24 @@ where
     pub channel_cfg: ChannelConfig,
     mode: Mode,
     squelch_open: bool,
+    rendering_mgr: RenderingMgr,
+    dialer: Dialer,
+    keyboard_state: KeyboardState,
 }
 
 impl<BUS> RadioController<BUS>
 where
     BUS: Bk4819Bus,
 {
-    pub fn new(bk: Bk4819Driver<BUS>, cfg: ChannelConfig) -> Self {
+    pub fn new(bk: Bk4819Driver<BUS>) -> Self {
         Self {
             bk,
-            channel_cfg: cfg,
+            channel_cfg: ChannelConfig::default(),
             mode: Mode::Rx,
             squelch_open: false,
+            rendering_mgr: RenderingMgr::default(),
+            dialer: Dialer::default(),
+            keyboard_state: KeyboardState::default(),
         }
     }
 
@@ -107,6 +118,40 @@ where
     pub fn init(&mut self) -> Result<(), BUS::Error> {
         self.bk.init()?;
         self.enter_rx()
+    }
+
+    pub fn eat_keyboard_event(&mut self, event: Option<KeyEvent>) {
+        if let Some(event) = event {
+            self.dialer.eat_keyboard_event(event);
+        }
+
+        if let Some(frequency) = self.dialer.get_frequency() {
+            self.channel_cfg.freq = frequency * 1000;
+        }
+    }
+
+    pub fn render_display<D: DrawTarget<Color = BinaryColor>>(
+        &mut self,
+        display: &mut D,
+    ) -> Result<(), BUS::Error> {
+        let rssi = self.bk.get_rssi_dbm().unwrap_or(0);
+
+        let _ = RenderingMgr::render_main(display, self.channel_cfg, rssi as f32, &self.dialer);
+
+        Ok(())
+    }
+
+    pub fn eat_ptt<D: DelayNs>(&mut self, ptt: bool, delay: &mut D) -> Result<(), BUS::Error> {
+        match (ptt, self.mode()) {
+            (true, Mode::Rx) => {
+                let _ = self.enter_tx(delay);
+            }
+            (false, Mode::Tx) => {
+                let _ = self.enter_rx();
+            }
+            _ => {}
+        }
+        Ok(())
     }
 
     /// Enter RX mode (minimal port of the C sequencing used in `RADIO_SetupRegisters()`).

@@ -51,11 +51,7 @@ impl Config {
 
     #[inline]
     const fn clamp4(v: u8) -> u8 {
-        if v > 15 {
-            15
-        } else {
-            v
-        }
+        if v > 15 { 15 } else { v }
     }
 
     #[inline]
@@ -348,9 +344,7 @@ fn iic_sda_function<IIC: Instance>(port: Port, pin: u8) -> Option<u8> {
 
 impl SclPin<pac::IIC0> {
     #[inline]
-    pub fn new(
-        pin: crate::gpio::Pin<crate::gpio::Disabled>,
-    ) -> Result<Self, InvalidPin> {
+    pub fn new(pin: crate::gpio::Pin<crate::gpio::Disabled>) -> Result<Self, InvalidPin> {
         let port = pin.port();
         let p = pin.pin();
         iic_scl_function::<pac::IIC0>(port, p)
@@ -365,9 +359,7 @@ impl SclPin<pac::IIC0> {
 
 impl SdaPin<pac::IIC0> {
     #[inline]
-    pub fn new(
-        pin: crate::gpio::Pin<crate::gpio::Disabled>,
-    ) -> Result<Self, InvalidPin> {
+    pub fn new(pin: crate::gpio::Pin<crate::gpio::Disabled>) -> Result<Self, InvalidPin> {
         let port = pin.port();
         let p = pin.pin();
         iic_sda_function::<pac::IIC0>(port, p)
@@ -382,9 +374,7 @@ impl SdaPin<pac::IIC0> {
 
 impl SclPin<pac::IIC1> {
     #[inline]
-    pub fn new(
-        pin: crate::gpio::Pin<crate::gpio::Disabled>,
-    ) -> Result<Self, InvalidPin> {
+    pub fn new(pin: crate::gpio::Pin<crate::gpio::Disabled>) -> Result<Self, InvalidPin> {
         let port = pin.port();
         let p = pin.pin();
         iic_scl_function::<pac::IIC1>(port, p)
@@ -399,9 +389,7 @@ impl SclPin<pac::IIC1> {
 
 impl SdaPin<pac::IIC1> {
     #[inline]
-    pub fn new(
-        pin: crate::gpio::Pin<crate::gpio::Disabled>,
-    ) -> Result<Self, InvalidPin> {
+    pub fn new(pin: crate::gpio::Pin<crate::gpio::Disabled>) -> Result<Self, InvalidPin> {
         let port = pin.port();
         let p = pin.pin();
         iic_sda_function::<pac::IIC1>(port, p)

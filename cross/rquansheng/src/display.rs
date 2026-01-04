@@ -110,6 +110,12 @@ impl DisplayMgr {
 
 pub struct RenderingMgr {}
 
+impl Default for RenderingMgr {
+    fn default() -> Self {
+        Self {}
+    }
+}
+
 impl RenderingMgr {
     pub fn render_main<D: DrawTarget<Color = BinaryColor>>(
         display: &mut D,

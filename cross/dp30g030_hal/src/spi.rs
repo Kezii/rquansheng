@@ -406,9 +406,7 @@ impl MisoConfig<pac::SPI1> for MisoPin<pac::SPI1> {
 
 impl SckPin<pac::SPI0> {
     #[inline]
-    pub fn new(
-        pin: crate::gpio::Pin<crate::gpio::Disabled>,
-    ) -> Result<Self, InvalidPin> {
+    pub fn new(pin: crate::gpio::Pin<crate::gpio::Disabled>) -> Result<Self, InvalidPin> {
         let port = pin.port();
         let p = pin.pin();
         spi0_sck_fn(port, p)
@@ -423,9 +421,7 @@ impl SckPin<pac::SPI0> {
 
 impl MosiPin<pac::SPI0> {
     #[inline]
-    pub fn new(
-        pin: crate::gpio::Pin<crate::gpio::Disabled>,
-    ) -> Result<Self, InvalidPin> {
+    pub fn new(pin: crate::gpio::Pin<crate::gpio::Disabled>) -> Result<Self, InvalidPin> {
         let port = pin.port();
         let p = pin.pin();
         spi0_mosi_fn(port, p)
@@ -440,9 +436,7 @@ impl MosiPin<pac::SPI0> {
 
 impl MisoPin<pac::SPI0> {
     #[inline]
-    pub fn new(
-        pin: crate::gpio::Pin<crate::gpio::Disabled>,
-    ) -> Result<Self, InvalidPin> {
+    pub fn new(pin: crate::gpio::Pin<crate::gpio::Disabled>) -> Result<Self, InvalidPin> {
         let port = pin.port();
         let p = pin.pin();
         spi0_miso_fn(port, p)
@@ -457,9 +451,7 @@ impl MisoPin<pac::SPI0> {
 
 impl SckPin<pac::SPI1> {
     #[inline]
-    pub fn new(
-        pin: crate::gpio::Pin<crate::gpio::Disabled>,
-    ) -> Result<Self, InvalidPin> {
+    pub fn new(pin: crate::gpio::Pin<crate::gpio::Disabled>) -> Result<Self, InvalidPin> {
         let port = pin.port();
         let p = pin.pin();
         spi1_sck_fn(port, p)
@@ -474,9 +466,7 @@ impl SckPin<pac::SPI1> {
 
 impl MosiPin<pac::SPI1> {
     #[inline]
-    pub fn new(
-        pin: crate::gpio::Pin<crate::gpio::Disabled>,
-    ) -> Result<Self, InvalidPin> {
+    pub fn new(pin: crate::gpio::Pin<crate::gpio::Disabled>) -> Result<Self, InvalidPin> {
         let port = pin.port();
         let p = pin.pin();
         spi1_mosi_fn(port, p)
@@ -491,9 +481,7 @@ impl MosiPin<pac::SPI1> {
 
 impl MisoPin<pac::SPI1> {
     #[inline]
-    pub fn new(
-        pin: crate::gpio::Pin<crate::gpio::Disabled>,
-    ) -> Result<Self, InvalidPin> {
+    pub fn new(pin: crate::gpio::Pin<crate::gpio::Disabled>) -> Result<Self, InvalidPin> {
         let port = pin.port();
         let p = pin.pin();
         spi1_miso_fn(port, p)

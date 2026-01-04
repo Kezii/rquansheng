@@ -403,9 +403,7 @@ fn uart_rx_function<UART: Instance>(port: Port, pin: u8) -> Option<u8> {
 
 impl TxPin<pac::UART0> {
     #[inline]
-    pub fn new(
-        pin: crate::gpio::Pin<crate::gpio::Disabled>,
-    ) -> Result<Self, InvalidPin> {
+    pub fn new(pin: crate::gpio::Pin<crate::gpio::Disabled>) -> Result<Self, InvalidPin> {
         let port = pin.port();
         let p = pin.pin();
         uart_tx_function::<pac::UART0>(port, p)
@@ -420,9 +418,7 @@ impl TxPin<pac::UART0> {
 
 impl RxPin<pac::UART0> {
     #[inline]
-    pub fn new(
-        pin: crate::gpio::Pin<crate::gpio::Disabled>,
-    ) -> Result<Self, InvalidPin> {
+    pub fn new(pin: crate::gpio::Pin<crate::gpio::Disabled>) -> Result<Self, InvalidPin> {
         let port = pin.port();
         let p = pin.pin();
         uart_rx_function::<pac::UART0>(port, p)
@@ -437,9 +433,7 @@ impl RxPin<pac::UART0> {
 
 impl TxPin<pac::UART1> {
     #[inline]
-    pub fn new(
-        pin: crate::gpio::Pin<crate::gpio::Disabled>,
-    ) -> Result<Self, InvalidPin> {
+    pub fn new(pin: crate::gpio::Pin<crate::gpio::Disabled>) -> Result<Self, InvalidPin> {
         let port = pin.port();
         let p = pin.pin();
         uart_tx_function::<pac::UART1>(port, p)
@@ -454,9 +448,7 @@ impl TxPin<pac::UART1> {
 
 impl RxPin<pac::UART1> {
     #[inline]
-    pub fn new(
-        pin: crate::gpio::Pin<crate::gpio::Disabled>,
-    ) -> Result<Self, InvalidPin> {
+    pub fn new(pin: crate::gpio::Pin<crate::gpio::Disabled>) -> Result<Self, InvalidPin> {
         let port = pin.port();
         let p = pin.pin();
         uart_rx_function::<pac::UART1>(port, p)
@@ -471,9 +463,7 @@ impl RxPin<pac::UART1> {
 
 impl TxPin<pac::UART2> {
     #[inline]
-    pub fn new(
-        pin: crate::gpio::Pin<crate::gpio::Disabled>,
-    ) -> Result<Self, InvalidPin> {
+    pub fn new(pin: crate::gpio::Pin<crate::gpio::Disabled>) -> Result<Self, InvalidPin> {
         let port = pin.port();
         let p = pin.pin();
         uart_tx_function::<pac::UART2>(port, p)
@@ -488,9 +478,7 @@ impl TxPin<pac::UART2> {
 
 impl RxPin<pac::UART2> {
     #[inline]
-    pub fn new(
-        pin: crate::gpio::Pin<crate::gpio::Disabled>,
-    ) -> Result<Self, InvalidPin> {
+    pub fn new(pin: crate::gpio::Pin<crate::gpio::Disabled>) -> Result<Self, InvalidPin> {
         let port = pin.port();
         let p = pin.pin();
         uart_rx_function::<pac::UART2>(port, p)

@@ -69,7 +69,7 @@ mod app {
         radio:
             RadioController<Bk4819BitBang<Pin<Output>, Pin<Output>, Dp32g030BidiPin, CycleDelay>>,
         audio_on: bool,
-        dialer: Dialer,
+        //dialer: Dialer,
     }
 
     // Local resources go here
@@ -114,7 +114,8 @@ mod app {
         let delay_bb = CycleDelay::new(48_000_000);
         let bus = Bk4819BitBang::new(scn, scl, sda, delay_bb).unwrap();
         let bk = Bk4819Driver::new(Bk4819::new(bus));
-        let mut radio = RadioController::new(bk, RadioConfig::default());
+
+        let mut radio = RadioController::new(bk);
 
         // PTT is PC5, active-low, with pull-up enabled in the reference firmware.
         // We do simple polling + debounce in `radio_10ms_task`.
@@ -166,7 +167,6 @@ mod app {
 
         defmt::info!("init");
 
-        // Bring up BK4819 once, then spawn control + tick tasks.
         if radio.init().is_err() {
             defmt::warn!("radio init failed");
         }
@@ -183,7 +183,6 @@ mod app {
                 // Initialization of shared resources go here
                 radio,
                 audio_on: false,
-                dialer: Dialer::default(),
             },
             Local {
                 // Initialization of local resources go here
@@ -240,23 +239,15 @@ mod app {
         }
     }
 
-    // Display demo task: updates the ST7565 periodically with a simple pattern.
-    #[task(priority = 1, local = [pin_backlight,display,display_update_reader], shared = [radio, dialer])]
+    #[task(priority = 1, local = [pin_backlight,display,display_update_reader], shared = [radio])]
     async fn display_task(mut cx: display_task::Context) {
         cx.local.pin_backlight.set_high();
 
         loop {
-            let channel_cfg = cx.shared.radio.lock(|r| r.channel_cfg);
-            let rssi_db = cx.shared.radio.lock(|r| r.bk.get_rssi_dbm().unwrap_or(0));
-            let dialer = cx.shared.dialer.lock(|d| d.clone());
-
-            RenderingMgr::render_main(
-                &mut cx.local.display.display,
-                channel_cfg,
-                rssi_db as f32,
-                &dialer,
-            )
-            .unwrap();
+            let _ = cx
+                .shared
+                .radio
+                .lock(|r| r.render_display(&mut cx.local.display.display));
 
             cx.local.display.display.flush().unwrap();
 
@@ -267,7 +258,7 @@ mod app {
     }
 
     /// 10ms tick task: poll+debounce PTT, poll BK4819 interrupts, and update audio.
-    #[task(priority = 1, shared = [radio, audio_on, dialer], local = [pin_audio_path, pin_ptt, radio_delay, keyboard_state,display_update_writer])]
+    #[task(priority = 1, shared = [radio, audio_on], local = [pin_audio_path, pin_ptt, radio_delay, keyboard_state,display_update_writer])]
     async fn radio_10ms_task(mut cx: radio_10ms_task::Context) {
         // Simple debounce (like C firmware): require 3 consecutive 10ms samples.
         let mut ptt_last_sample = false;
@@ -289,21 +280,17 @@ mod app {
                 ptt_stable = pressed_now;
             }
 
+            let key = rquansheng::keyboard::Keyboard::init().poll(&mut cx.local.radio_delay);
+            let event = cx.local.keyboard_state.eat_key(key);
+
             // Do everything that touches BK4819 under one lock, then act on the GPIO audio path.
             let desired_audio_on = cx.shared.radio.lock(|r| {
-                // PTT-driven state transitions (RX <-> TX).
-                match (ptt_stable, r.mode()) {
-                    (true, rquansheng::radio::Mode::Rx) => {
-                        let _ = r.enter_tx(cx.local.radio_delay);
-                    }
-                    (false, rquansheng::radio::Mode::Tx) => {
-                        let _ = r.enter_rx();
-                    }
-                    _ => {}
-                }
+                r.eat_keyboard_event(event);
+
+                r.eat_ptt(ptt_stable, &mut cx.local.radio_delay);
 
                 // Poll BK IRQ/status (C-style) and update internal state/LED/AF.
-                let _ = r.poll_interrupts();
+                r.poll_interrupts().ok();
 
                 // Board audio path should follow controller's desired state.
                 r.desired_audio_on()
@@ -317,23 +304,10 @@ mod app {
                 let _ = cx.local.pin_audio_path.set_low();
             }
 
-            {
-                let mut keyboard = rquansheng::keyboard::Keyboard::init();
-
-                if let Some(key) =
-                    keyboard.get_event(cx.local.keyboard_state, &mut cx.local.radio_delay)
-                {
-                    defmt::info!("key pressed: {:?}", key);
-                    cx.shared.dialer.lock(|d| d.eat_keyboard_event(key));
-                    cx.local.display_update_writer.write(true);
-                }
-            }
-
-            if let Some(frequency) = cx.shared.dialer.lock(|d| d.get_frequency()) {
-                defmt::info!("got from dialer frequency: {}", frequency);
-                cx.shared
-                    .radio
-                    .lock(|r| r.channel_cfg.freq = frequency * 1000);
+            // if a key was pressed, we hurry a display update
+            if let Some(key) = event {
+                cx.local.display_update_writer.write(true);
+                defmt::info!("key pressed: {:?}", key);
             }
 
             Mono::delay(10.millis()).await;

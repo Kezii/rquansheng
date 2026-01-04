@@ -780,6 +780,8 @@ version = "0.1.0"
 dependencies = [
  "embedded-graphics",
  "embedded-graphics-simulator",
+ "env_logger 0.11.8",
+ "log",
  "rquansheng",
 ]
 
