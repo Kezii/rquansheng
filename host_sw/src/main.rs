@@ -13,6 +13,7 @@ use log::info;
 use rquansheng::{
     bk4819::Bk4819Driver,
     bk4819_bitbang::{Bk4819, Bk4819Bus},
+    delay::DecentDelay,
     dialer::Dialer,
     display::RenderingMgr,
     keyboard::{KeyEvent, QuanshengKey},
@@ -154,6 +155,12 @@ pub struct DummyDelay;
 impl DelayNs for DummyDelay {
     fn delay_ns(&mut self, ns: u32) {
         std::thread::sleep(std::time::Duration::from_nanos(ns as u64));
+    }
+}
+
+impl DecentDelay for DummyDelay {
+    async fn delay_ms(&mut self, ms: u32) {
+        std::thread::sleep(std::time::Duration::from_millis(ms.into()));
     }
 }
 

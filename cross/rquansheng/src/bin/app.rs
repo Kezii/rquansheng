@@ -2,11 +2,11 @@
 #![no_std]
 //#![feature(type_alias_impl_trait)]
 
-use rquansheng::{self as _}; // global logger + panicking-behavior + memory layout
+use rquansheng::{self as _, delay::DecentDelay}; // global logger + panicking-behavior + memory layout
 
 use dp30g030_hal as _;
 
-use rtic_monotonics::systick::prelude::*;
+use rtic_monotonics::{fugit::Duration, systick::prelude::*};
 
 use static_cell::StaticCell;
 
@@ -61,7 +61,7 @@ mod app {
     use rtic_monotonics::{fugit::ExtU32, Monotonic as _};
     use rtic_sync::signal::{Signal, SignalReader, SignalWriter};
 
-    use crate::Mono;
+    use crate::{Mono, MonoDelay};
 
     // Shared resources go here
     #[shared]
@@ -81,7 +81,6 @@ mod app {
         pin_audio_path: Pin<Output>,
         pin_ptt: Pin<Input>,
         adc: adc::Adc,
-        radio_delay: CycleDelay,
         keyboard_state: KeyboardState,
         display: DisplayMgr,
         display_update_reader: SignalReader<'static, bool>,
@@ -187,7 +186,6 @@ mod app {
                 pin_audio_path,
                 pin_ptt,
                 adc,
-                radio_delay: CycleDelay::new(48_000_000),
                 display,
                 keyboard_state,
                 display_update_reader,
@@ -253,7 +251,7 @@ mod app {
     }
 
     /// 10ms tick task: poll+debounce PTT, poll BK4819 interrupts, and update audio.
-    #[task(priority = 1, shared = [radio, audio_on], local = [pin_audio_path, pin_ptt, radio_delay, keyboard_state,display_update_writer])]
+    #[task(priority = 1, shared = [radio, audio_on], local = [pin_audio_path, pin_ptt, keyboard_state,display_update_writer])]
     async fn radio_10ms_task(mut cx: radio_10ms_task::Context) {
         // Simple debounce (like C firmware): require 3 consecutive 10ms samples.
         let mut ptt_last_sample = false;
@@ -278,14 +276,14 @@ mod app {
             let key = if ptt_stable {
                 Some(rquansheng::keyboard::QuanshengKey::Ptt)
             } else {
-                rquansheng::keyboard::Keyboard::init().poll(&mut cx.local.radio_delay)
+                rquansheng::keyboard::Keyboard::init().poll(&mut CycleDelay::new(48_000_000))
             };
 
             let event = cx.local.keyboard_state.eat_key(key);
 
             // Do everything that touches BK4819 under one lock, then act on the GPIO audio path.
             let desired_audio_on = cx.shared.radio.lock(|r| {
-                r.eat_keyboard_event(event, &mut cx.local.radio_delay);
+                r.eat_keyboard_event(event, &mut MonoDelay::default());
 
                 //r.eat_ptt(ptt_stable, &mut cx.local.radio_delay);
 
@@ -312,5 +310,14 @@ mod app {
 
             Mono::delay(10.millis()).await;
         }
+    }
+}
+
+#[derive(Default)]
+pub struct MonoDelay;
+
+impl DecentDelay for MonoDelay {
+    async fn delay_ms(&mut self, ms: u32) {
+        Mono::delay(ms.millis()).await;
     }
 }

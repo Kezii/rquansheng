@@ -2,6 +2,7 @@ use core::cmp::min;
 
 use cortex_m::asm;
 use embedded_hal::delay::DelayNs;
+use rtic_monotonics::fugit::Duration;
 
 /// Simple busy-wait delay based on core clock.
 ///
@@ -42,4 +43,8 @@ impl DelayNs for CycleDelay {
     fn delay_ms(&mut self, ms: u32) {
         self.delay_us(ms.saturating_mul(1_000));
     }
+}
+
+pub trait DecentDelay {
+    async fn delay_ms(&mut self, ms: u32);
 }
