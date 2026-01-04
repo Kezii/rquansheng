@@ -21,6 +21,10 @@ impl<const N: usize> Dialer<N> {
             if let Some(ch) = key.as_ascii_char() {
                 self.number.push(ch).ok();
             }
+
+            if key == QuanshengKey::Exit {
+                self.clear();
+            }
         }
     }
 
@@ -41,8 +45,9 @@ impl<const N: usize> Dialer<N> {
             return None;
         }
         let mut frequency = 0;
+
         for (i, ch) in self.number.as_str().chars().enumerate() {
-            frequency += (ch as u32 - '0' as u32) * 10_u32.pow(5 - i as u32);
+            frequency += (ch as u32 - '0' as u32) * 10_u32.pow(N as u32 - 1 - i as u32);
         }
 
         self.clear();

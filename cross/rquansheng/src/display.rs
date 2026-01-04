@@ -190,10 +190,12 @@ impl RenderingMgr {
         .draw(display)?;
 
         let mut rssi_string = String::<6>::new();
-        if mode == Mode::Rx {
-            write!(rssi_string, "{}", rssi).ok();
-        } else {
+        if dialer.is_dialing() {
+            write!(rssi_string, "DIAL").ok();
+        } else if mode == Mode::Tx {
             write!(rssi_string, " TX").ok();
+        } else {
+            write!(rssi_string, "{}", rssi).ok();
         }
         Text::new(
             &rssi_string,

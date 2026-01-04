@@ -134,7 +134,8 @@ where
         }
 
         if let Some(frequency) = self.dialer.get_frequency() {
-            self.channel_cfg.freq = frequency * 1000;
+            self.channel_cfg.freq = frequency * 10;
+            log::info!("dialed frequency: {}", self.channel_cfg.freq);
         }
     }
 
