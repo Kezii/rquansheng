@@ -283,7 +283,7 @@ mod app {
 
             // Do everything that touches BK4819 under one lock, then act on the GPIO audio path.
             let desired_audio_on = cx.shared.radio.lock(|r| {
-                r.eat_keyboard_event(event, &mut MonoDelay::default());
+                r.eat_keyboard_event(event, &mut MonoDelay);
 
                 //r.eat_ptt(ptt_stable, &mut cx.local.radio_delay);
 
@@ -313,7 +313,6 @@ mod app {
     }
 }
 
-#[derive(Default)]
 pub struct MonoDelay;
 
 impl DecentDelay for MonoDelay {

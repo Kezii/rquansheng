@@ -1,366 +1,48 @@
 use bitfield_struct::{bitenum, bitfield};
 
-use crate::{bk4819::Bk4819Driver, bk4819_bitbang::Bk4819Bus};
+use bk4819_reg_macros::address;
 
 // THIS DRIVER IS A BEST EFFORT ATTEMPT AT PARSING THE DOCUMENTATION
 // WARNING: THIS DRIVER IS NOT GUARANTEED TO BE CORRECT
 // WARNING: THIS HAS BEEN TOUCHED BY AN LLM
 // WARNING: EVEN IF CORRECT, SOME FIELDS ARE UNDOCUMENTED IN THE DOCUMENTATION
-//          BUT THEY ARE USED IN THE FIRMWARE
+//          BUT THEY ARE USED IN THE ORIGINAL FIRMWARE
 
-#[derive(Copy, Clone, Debug)]
-pub enum Register {
-    Reg00(Reg00),
-    Reg02(Reg02),
-    Reg07(Reg07),
-    Reg08(Reg08),
-    Reg09(Reg09),
-    Reg0A(Reg0A),
-    Reg0B(Reg0B),
-    Reg0C(Reg0C),
-    Reg0D(Reg0D),
-    Reg0E(Reg0E),
-    Reg10(Reg10),
-    Reg11(Reg11),
-    Reg12(Reg12),
-    Reg13(Reg13),
-    Reg14(Reg14),
-    Reg19(Reg19),
-    Reg1A(Reg1A),
-    Reg1F(Reg1F),
-    Reg24(Reg24),
-    Reg28(Reg28),
-    Reg29(Reg29),
-    Reg2B(Reg2B),
-    Reg2E(Reg2E),
-    Reg30(Reg30),
-    Reg31(Reg31),
-    Reg32(Reg32),
-    Reg33(Reg33),
-    Reg34(Reg34),
-    Reg35(Reg35),
-    Reg36(Reg36),
-    Reg37(Reg37),
-    Reg38(Reg38),
-    Reg39(Reg39),
-    Reg3B(Reg3B),
-    Reg3C(Reg3C),
-    Reg3D(Reg3D),
-    Reg3E(Reg3E),
-    Reg3F(Reg3F),
-    Reg40(Reg40),
-    Reg43(Reg43),
-    Reg44(Reg44),
-    Reg45(Reg45),
-    Reg46(Reg46),
-    Reg47(Reg47),
-    Reg48(Reg48),
-    Reg4B(Reg4B),
-    Reg4D(Reg4D),
-    Reg4E(Reg4E),
-    Reg4F(Reg4F),
-    Reg50(Reg50),
-    Reg51(Reg51),
-    Reg52(Reg52),
-    Reg54(Reg54),
-    Reg55(Reg55),
-    Reg58(Reg58),
-    Reg59(Reg59),
-    Reg5A(Reg5A),
-    Reg5B(Reg5B),
-    Reg5C(Reg5C),
-    Reg5D(Reg5D),
-    Reg5E(Reg5E),
-    Reg5F(Reg5F),
-    Reg63(Reg63),
-    Reg64(Reg64),
-    Reg65(Reg65),
-    Reg67(Reg67),
-    Reg68(Reg68),
-    Reg69(Reg69),
-    Reg6A(Reg6A),
-    Reg6F(Reg6F),
-    Reg70(Reg70),
-    Reg71(Reg71),
-    Reg72(Reg72),
-    Reg73(Reg73),
-    Reg74(Reg74),
-    Reg75(Reg75),
-    Reg78(Reg78),
-    Reg79(Reg79),
-    Reg7A(Reg7A),
-    Reg7D(Reg7D),
-    Reg7E(Reg7E),
+/// Implemented by each BK4819 register struct to provide the register address.
+///
+/// `#[address(0x..)]` auto-implements this for the annotated struct.
+pub trait RegisterAddress {
+    const ADDRESS: u8;
+
+    #[inline]
+    fn get_address() -> u8
+    where
+        Self: Sized,
+    {
+        Self::ADDRESS
+    }
 }
 
-impl Register {
-    /// Return the BK4819 register address (0x00..=0x7E).
-    pub const fn as_u8(&self) -> u8 {
-        match self {
-            Register::Reg00(_) => 0x00,
-            Register::Reg02(_) => 0x02,
-            Register::Reg07(_) => 0x07,
-            Register::Reg08(_) => 0x08,
-            Register::Reg09(_) => 0x09,
-            Register::Reg0A(_) => 0x0A,
-            Register::Reg0B(_) => 0x0B,
-            Register::Reg0C(_) => 0x0C,
-            Register::Reg0D(_) => 0x0D,
-            Register::Reg0E(_) => 0x0E,
-            Register::Reg10(_) => 0x10,
-            Register::Reg11(_) => 0x11,
-            Register::Reg12(_) => 0x12,
-            Register::Reg13(_) => 0x13,
-            Register::Reg14(_) => 0x14,
-            Register::Reg19(_) => 0x19,
-            Register::Reg1A(_) => 0x1A,
-            Register::Reg1F(_) => 0x1F,
-            Register::Reg24(_) => 0x24,
-            Register::Reg28(_) => 0x28,
-            Register::Reg29(_) => 0x29,
-            Register::Reg2B(_) => 0x2B,
-            Register::Reg2E(_) => 0x2E,
-            Register::Reg30(_) => 0x30,
-            Register::Reg31(_) => 0x31,
-            Register::Reg32(_) => 0x32,
-            Register::Reg33(_) => 0x33,
-            Register::Reg34(_) => 0x34,
-            Register::Reg35(_) => 0x35,
-            Register::Reg36(_) => 0x36,
-            Register::Reg37(_) => 0x37,
-            Register::Reg38(_) => 0x38,
-            Register::Reg39(_) => 0x39,
-            Register::Reg3B(_) => 0x3B,
-            Register::Reg3C(_) => 0x3C,
-            Register::Reg3D(_) => 0x3D,
-            Register::Reg3E(_) => 0x3E,
-            Register::Reg3F(_) => 0x3F,
-            Register::Reg40(_) => 0x40,
-            Register::Reg43(_) => 0x43,
-            Register::Reg44(_) => 0x44,
-            Register::Reg45(_) => 0x45,
-            Register::Reg46(_) => 0x46,
-            Register::Reg47(_) => 0x47,
-            Register::Reg48(_) => 0x48,
-            Register::Reg4B(_) => 0x4B,
-            Register::Reg4D(_) => 0x4D,
-            Register::Reg4E(_) => 0x4E,
-            Register::Reg4F(_) => 0x4F,
-            Register::Reg50(_) => 0x50,
-            Register::Reg51(_) => 0x51,
-            Register::Reg52(_) => 0x52,
-            Register::Reg54(_) => 0x54,
-            Register::Reg55(_) => 0x55,
-            Register::Reg58(_) => 0x58,
-            Register::Reg59(_) => 0x59,
-            Register::Reg5A(_) => 0x5A,
-            Register::Reg5B(_) => 0x5B,
-            Register::Reg5C(_) => 0x5C,
-            Register::Reg5D(_) => 0x5D,
-            Register::Reg5E(_) => 0x5E,
-            Register::Reg5F(_) => 0x5F,
-            Register::Reg63(_) => 0x63,
-            Register::Reg64(_) => 0x64,
-            Register::Reg65(_) => 0x65,
-            Register::Reg67(_) => 0x67,
-            Register::Reg68(_) => 0x68,
-            Register::Reg69(_) => 0x69,
-            Register::Reg6A(_) => 0x6A,
-            Register::Reg6F(_) => 0x6F,
-            Register::Reg70(_) => 0x70,
-            Register::Reg71(_) => 0x71,
-            Register::Reg72(_) => 0x72,
-            Register::Reg73(_) => 0x73,
-            Register::Reg74(_) => 0x74,
-            Register::Reg75(_) => 0x75,
-            Register::Reg78(_) => 0x78,
-            Register::Reg79(_) => 0x79,
-            Register::Reg7A(_) => 0x7A,
-            Register::Reg7D(_) => 0x7D,
-            Register::Reg7E(_) => 0x7E,
-        }
+/// Marker trait for BK4819 register value types.
+///
+/// For bitfield structs this is usually satisfied by the auto-generated `From<u16>` / `Into<u16>`.
+pub trait Bk4819Register:
+    RegisterAddress + Copy + From<u16> + Into<u16> + core::fmt::Debug + Default
+{
+    #[inline]
+    fn serialize(self) -> u16 {
+        self.into()
     }
 
-    pub fn serialize(&self) -> u16 {
-        match self {
-            Register::Reg00(reg) => (*reg).into(),
-            Register::Reg02(reg) => (*reg).into(),
-            Register::Reg07(reg) => (*reg).into(),
-            Register::Reg08(reg) => (*reg).into(),
-            Register::Reg09(reg) => (*reg).into(),
-            Register::Reg0A(reg) => (*reg).into(),
-            Register::Reg0B(reg) => (*reg).into(),
-            Register::Reg0C(reg) => (*reg).into(),
-            Register::Reg0D(reg) => (*reg).into(),
-            Register::Reg0E(reg) => (*reg).into(),
-            Register::Reg10(reg) => (*reg).into(),
-            Register::Reg11(reg) => (*reg).into(),
-            Register::Reg12(reg) => (*reg).into(),
-            Register::Reg13(reg) => (*reg).into(),
-            Register::Reg14(reg) => (*reg).into(),
-            Register::Reg19(reg) => (*reg).into(),
-            Register::Reg1A(reg) => (*reg).into(),
-            Register::Reg1F(reg) => (*reg).into(),
-            Register::Reg24(reg) => (*reg).into(),
-            Register::Reg28(reg) => (*reg).into(),
-            Register::Reg29(reg) => (*reg).into(),
-            Register::Reg2B(reg) => (*reg).into(),
-            Register::Reg2E(reg) => (*reg).into(),
-            Register::Reg30(reg) => (*reg).into(),
-            Register::Reg31(reg) => (*reg).into(),
-            Register::Reg32(reg) => (*reg).into(),
-            Register::Reg33(reg) => (*reg).into(),
-            Register::Reg34(reg) => (*reg).into(),
-            Register::Reg35(reg) => (*reg).into(),
-            Register::Reg36(reg) => (*reg).into(),
-            Register::Reg37(reg) => (*reg).into(),
-            Register::Reg38(reg) => (*reg).into(),
-            Register::Reg39(reg) => (*reg).into(),
-            Register::Reg3B(reg) => (*reg).into(),
-            Register::Reg3C(reg) => (*reg).into(),
-            Register::Reg3D(reg) => (*reg).into(),
-            Register::Reg3E(reg) => (*reg).into(),
-            Register::Reg3F(reg) => (*reg).into(),
-            Register::Reg40(reg) => (*reg).into(),
-            Register::Reg43(reg) => (*reg).into(),
-            Register::Reg44(reg) => (*reg).into(),
-            Register::Reg45(reg) => (*reg).into(),
-            Register::Reg46(reg) => (*reg).into(),
-            Register::Reg47(reg) => (*reg).into(),
-            Register::Reg48(reg) => (*reg).into(),
-            Register::Reg4B(reg) => (*reg).into(),
-            Register::Reg4D(reg) => (*reg).into(),
-            Register::Reg4E(reg) => (*reg).into(),
-            Register::Reg4F(reg) => (*reg).into(),
-            Register::Reg50(reg) => (*reg).into(),
-            Register::Reg51(reg) => (*reg).into(),
-            Register::Reg52(reg) => (*reg).into(),
-            Register::Reg54(reg) => (*reg).into(),
-            Register::Reg55(reg) => (*reg).into(),
-            Register::Reg58(reg) => (*reg).into(),
-            Register::Reg59(reg) => (*reg).into(),
-            Register::Reg5A(reg) => (*reg).into(),
-            Register::Reg5B(reg) => (*reg).into(),
-            Register::Reg5C(reg) => (*reg).into(),
-            Register::Reg5D(reg) => (*reg).into(),
-            Register::Reg5E(reg) => (*reg).into(),
-            Register::Reg5F(reg) => (*reg).into(),
-            Register::Reg63(reg) => (*reg).into(),
-            Register::Reg64(reg) => (*reg).into(),
-            Register::Reg65(reg) => (*reg).into(),
-            Register::Reg67(reg) => (*reg).into(),
-            Register::Reg68(reg) => (*reg).into(),
-            Register::Reg69(reg) => (*reg).into(),
-            Register::Reg6A(reg) => (*reg).into(),
-            Register::Reg6F(reg) => (*reg).into(),
-            Register::Reg70(reg) => (*reg).into(),
-            Register::Reg71(reg) => (*reg).into(),
-            Register::Reg72(reg) => (*reg).into(),
-            Register::Reg73(reg) => (*reg).into(),
-            Register::Reg74(reg) => (*reg).into(),
-            Register::Reg75(reg) => (*reg).into(),
-            Register::Reg78(reg) => (*reg).into(),
-            Register::Reg79(reg) => (*reg).into(),
-            Register::Reg7A(reg) => (*reg).into(),
-            Register::Reg7D(reg) => (*reg).into(),
-            Register::Reg7E(reg) => (*reg).into(),
-        }
+    #[inline]
+    fn deserialize(data: u16) -> Self {
+        Self::from(data)
     }
+}
 
-    pub fn deserialize(&self, data: u16) -> Self {
-        match self {
-            Register::Reg00(_) => Register::Reg00(Reg00::from(data)),
-            Register::Reg02(_) => Register::Reg02(Reg02::from(data)),
-            Register::Reg07(_) => Register::Reg07(Reg07::from(data)),
-            Register::Reg08(_) => Register::Reg08(Reg08::from(data)),
-            Register::Reg09(_) => Register::Reg09(Reg09::from(data)),
-            Register::Reg0A(_) => Register::Reg0A(Reg0A::from(data)),
-            Register::Reg0B(_) => Register::Reg0B(Reg0B::from(data)),
-            Register::Reg0C(_) => Register::Reg0C(Reg0C::from(data)),
-            Register::Reg0D(_) => Register::Reg0D(Reg0D::from(data)),
-            Register::Reg0E(_) => Register::Reg0E(Reg0E::from(data)),
-            Register::Reg10(_) => Register::Reg10(Reg10::from(data)),
-            Register::Reg11(_) => Register::Reg11(Reg11::from(data)),
-            Register::Reg12(_) => Register::Reg12(Reg12::from(data)),
-            Register::Reg13(_) => Register::Reg13(Reg13::from(data)),
-            Register::Reg14(_) => Register::Reg14(Reg14::from(data)),
-            Register::Reg19(_) => Register::Reg19(Reg19::from(data)),
-            Register::Reg1A(_) => Register::Reg1A(Reg1A::from(data)),
-            Register::Reg1F(_) => Register::Reg1F(Reg1F::from(data)),
-            Register::Reg24(_) => Register::Reg24(Reg24::from(data)),
-            Register::Reg28(_) => Register::Reg28(Reg28::from(data)),
-            Register::Reg29(_) => Register::Reg29(Reg29::from(data)),
-            Register::Reg2B(_) => Register::Reg2B(Reg2B::from(data)),
-            Register::Reg2E(_) => Register::Reg2E(Reg2E::from(data)),
-            Register::Reg30(_) => Register::Reg30(Reg30::from(data)),
-            Register::Reg31(_) => Register::Reg31(Reg31::from(data)),
-            Register::Reg32(_) => Register::Reg32(Reg32::from(data)),
-            Register::Reg33(_) => Register::Reg33(Reg33::from(data)),
-            Register::Reg34(_) => Register::Reg34(Reg34::from(data)),
-            Register::Reg35(_) => Register::Reg35(Reg35::from(data)),
-            Register::Reg36(_) => Register::Reg36(Reg36::from(data)),
-            Register::Reg37(_) => Register::Reg37(Reg37::from(data)),
-            Register::Reg38(_) => Register::Reg38(Reg38::from(data)),
-            Register::Reg39(_) => Register::Reg39(Reg39::from(data)),
-            Register::Reg3B(_) => Register::Reg3B(Reg3B::from(data)),
-            Register::Reg3C(_) => Register::Reg3C(Reg3C::from(data)),
-            Register::Reg3D(_) => Register::Reg3D(Reg3D::from(data)),
-            Register::Reg3E(_) => Register::Reg3E(Reg3E::from(data)),
-            Register::Reg3F(_) => Register::Reg3F(Reg3F::from(data)),
-            Register::Reg40(_) => Register::Reg40(Reg40::from(data)),
-            Register::Reg43(_) => Register::Reg43(Reg43::from(data)),
-            Register::Reg44(_) => Register::Reg44(Reg44::from(data)),
-            Register::Reg45(_) => Register::Reg45(Reg45::from(data)),
-            Register::Reg46(_) => Register::Reg46(Reg46::from(data)),
-            Register::Reg47(_) => Register::Reg47(Reg47::from(data)),
-            Register::Reg48(_) => Register::Reg48(Reg48::from(data)),
-            Register::Reg4B(_) => Register::Reg4B(Reg4B::from(data)),
-            Register::Reg4D(_) => Register::Reg4D(Reg4D::from(data)),
-            Register::Reg4E(_) => Register::Reg4E(Reg4E::from(data)),
-            Register::Reg4F(_) => Register::Reg4F(Reg4F::from(data)),
-            Register::Reg50(_) => Register::Reg50(Reg50::from(data)),
-            Register::Reg51(_) => Register::Reg51(Reg51::from(data)),
-            Register::Reg52(_) => Register::Reg52(Reg52::from(data)),
-            Register::Reg54(_) => Register::Reg54(Reg54::from(data)),
-            Register::Reg55(_) => Register::Reg55(Reg55::from(data)),
-            Register::Reg58(_) => Register::Reg58(Reg58::from(data)),
-            Register::Reg59(_) => Register::Reg59(Reg59::from(data)),
-            Register::Reg5A(_) => Register::Reg5A(Reg5A::from(data)),
-            Register::Reg5B(_) => Register::Reg5B(Reg5B::from(data)),
-            Register::Reg5C(_) => Register::Reg5C(Reg5C::from(data)),
-            Register::Reg5D(_) => Register::Reg5D(Reg5D::from(data)),
-            Register::Reg5E(_) => Register::Reg5E(Reg5E::from(data)),
-            Register::Reg5F(_) => Register::Reg5F(Reg5F::from(data)),
-            Register::Reg63(_) => Register::Reg63(Reg63::from(data)),
-            Register::Reg64(_) => Register::Reg64(Reg64::from(data)),
-            Register::Reg65(_) => Register::Reg65(Reg65::from(data)),
-            Register::Reg67(_) => Register::Reg67(Reg67::from(data)),
-            Register::Reg68(_) => Register::Reg68(Reg68::from(data)),
-            Register::Reg69(_) => Register::Reg69(Reg69::from(data)),
-            Register::Reg6A(_) => Register::Reg6A(Reg6A::from(data)),
-            Register::Reg6F(_) => Register::Reg6F(Reg6F::from(data)),
-            Register::Reg70(_) => Register::Reg70(Reg70::from(data)),
-            Register::Reg71(_) => Register::Reg71(Reg71::from(data)),
-            Register::Reg72(_) => Register::Reg72(Reg72::from(data)),
-            Register::Reg73(_) => Register::Reg73(Reg73::from(data)),
-            Register::Reg74(_) => Register::Reg74(Reg74::from(data)),
-            Register::Reg75(_) => Register::Reg75(Reg75::from(data)),
-            Register::Reg78(_) => Register::Reg78(Reg78::from(data)),
-            Register::Reg79(_) => Register::Reg79(Reg79::from(data)),
-            Register::Reg7A(_) => Register::Reg7A(Reg7A::from(data)),
-            Register::Reg7D(_) => Register::Reg7D(Reg7D::from(data)),
-            Register::Reg7E(_) => Register::Reg7E(Reg7E::from(data)),
-        }
-    }
-
-    pub fn read<BUS: Bk4819Bus>(
-        &mut self,
-        radio: &mut Bk4819Driver<BUS>,
-    ) -> Result<Self, BUS::Error> {
-        let reg = radio.read_register_n(*self)?;
-
-        Ok(reg)
-    }
+impl<T> Bk4819Register for T where
+    T: RegisterAddress + Copy + From<u16> + Into<u16> + core::fmt::Debug + Default
+{
 }
 
 /// Auto-generated register bitfields/enums from `BK4819V3.svd`.
@@ -807,11 +489,20 @@ pub enum Reg7AVox0Delay {
     Vox0Delay = 0,
 }
 
+/*
+
+
+ ------------------------------------------------------------
+
+
+
+*/
 /// REG_00: Control register 0: soft reset.
+#[address(0x00)]
 #[bitfield(u16)]
 pub struct Reg00 {
     #[bits(15)]
-    __: u16,
+    pub undocumented: u16,
     /// Soft Reset. 1=Reset; 0=Normal.
     #[bits(1)]
     pub soft_reset: Reg00SoftReset,
@@ -820,7 +511,7 @@ pub struct Reg00 {
 /// REG_02: Interrupt/status flags (read-only).
 #[bitfield(u16)]
 pub struct Reg02 {
-    __0: bool,
+    pub undocumented: bool,
     /// FSK Rx Sync Interrupt.
     pub fsk_rx_sync: bool,
     /// Squelch Lost Interrupt.
@@ -871,20 +562,21 @@ pub struct Reg08 {
     #[bits(12)]
     pub code: u16,
     #[bits(3)]
-    __0: u8,
+    pub undocumented: u8,
     /// 1=CDCSS high 12-bit, 0=CDCSS low 12-bit.
     #[bits(1)]
     pub code_high: Reg08CodeHigh,
 }
 
 /// REG_09: DTMF/SelCall Symbol Coefficient for Detection.
+#[address(0x09)]
 #[bitfield(u16)]
 pub struct Reg09 {
     /// Coefficient.
     #[bits(8)]
     pub coefficient: u8,
     #[bits(4)]
-    __0: u8,
+    pub undocumented: u8,
     /// Symbol Number.
     #[bits(4)]
     pub symbol_number: u8,
@@ -897,19 +589,19 @@ pub struct Reg0A {
     #[bits(8)]
     pub gpio_in: u8,
     #[bits(8)]
-    __0: u8,
+    pub undocumented: u8,
 }
 
 /// REG_0B: DTMF/5Tone received + FSK sync/CRC indicators (read-only).
 #[bitfield(u16)]
 pub struct Reg0B {
     #[bits(4)]
-    __0: u8,
+    pub undocumented_0: u8,
     /// FSK Rx CRC Indicator. 1=Pass; 0=Fail.
     #[bits(1)]
     pub fsk_crc_pass: Reg0BFskCrcPass,
     #[bits(1)]
-    __1: bool,
+    pub undocumented_1: bool,
     /// FSK Rx Sync Positive has been found.
     pub fsk_sync_pos: bool,
     /// FSK Rx Sync Negative has been found.
@@ -918,7 +610,7 @@ pub struct Reg0B {
     #[bits(4)]
     pub dtmf_5tone_code: u8,
     #[bits(4)]
-    __3: u8,
+    pub undocumented_2: u8,
 }
 
 /// REG_0C: CTCSS/CDCSS/VoX/Squelch/IRQ indicators (read-only).
@@ -931,7 +623,7 @@ pub struct Reg0C {
     /// VoX Indicator.
     pub vox: bool,
     #[bits(7)]
-    __0: u8,
+    pub undocumented: u8,
     /// CTC1 received.
     pub ctc1_received: bool,
     /// CTC2 (55 Hz) received.
@@ -952,7 +644,7 @@ pub struct Reg0D {
     #[bits(11)]
     pub scan_hi: u16,
     #[bits(4)]
-    __0: u8,
+    pub undocumented: u8,
     /// Frequency Scan Indicator. 1=Busy; 0=Finished.
     pub scan_busy: bool,
 }
@@ -981,7 +673,7 @@ pub struct Reg10 {
     #[bits(2)]
     pub lna_gain_short: Reg10LnaGainShort,
     #[bits(6)]
-    __0: u8,
+    pub undocumented: u8,
 }
 
 /// REG_11: Rx AGC Gain Table[1] entry.
@@ -1000,7 +692,7 @@ pub struct Reg11 {
     #[bits(2)]
     pub lna_gain_short: Reg11LnaGainShort,
     #[bits(6)]
-    __0: u8,
+    pub undocumented: u8,
 }
 
 /// REG_12: Rx AGC Gain Table[2] entry.
@@ -1019,7 +711,7 @@ pub struct Reg12 {
     #[bits(2)]
     pub lna_gain_short: Reg12LnaGainShort,
     #[bits(6)]
-    __0: u8,
+    pub undocumented_0: u8,
 }
 
 /// REG_13: Rx AGC Gain Table[3] entry.
@@ -1038,7 +730,7 @@ pub struct Reg13 {
     #[bits(2)]
     pub lna_gain_short: Reg13LnaGainShort,
     #[bits(6)]
-    __0: u8,
+    pub undocumented_0: u8,
 }
 
 /// REG_14: Rx AGC Gain Table[4] entry.
@@ -1057,10 +749,11 @@ pub struct Reg14 {
     #[bits(2)]
     pub lna_gain_short: Reg14LnaGainShort,
     #[bits(6)]
-    __0: u8,
+    pub undocumented_0: u8,
 }
 
 /// REG_19: MIC AGC control.
+#[address(0x19)]
 #[bitfield(u16)]
 pub struct Reg19 {
     #[bits(15)]
@@ -1073,7 +766,7 @@ pub struct Reg19 {
 #[bitfield(u16)]
 pub struct Reg1A {
     #[bits(8)]
-    __0: u8,
+    pub undocumented_0: u8,
     /// Crystal iBit.
     #[bits(4)]
     pub xtal_ibit: u8,
@@ -1083,6 +776,7 @@ pub struct Reg1A {
 }
 
 /// REG_1F: PLL charge pump setting.
+#[address(0x1F)]
 #[bitfield(u16)]
 pub struct Reg1F {
     /// PLL CP bit.
@@ -1103,7 +797,7 @@ pub struct Reg24 {
     /// DTMF/SelCall Enable. 1=Enable; 0=Disable.
     pub dtmf_selcall_en: bool,
     #[bits(10)]
-    __0: u16,
+    pub undocumented_0: u16,
 }
 
 /// REG_28: AF Rx expander settings.
@@ -1144,7 +838,7 @@ pub struct Reg2B {
     /// Disable AF Tx HPF 300 filter. 0=Enable;1=Disable.
     pub aftx_hpf300_disable: bool,
     #[bits(5)]
-    __0: u8,
+    pub undocumented_0: u8,
     /// Disable AF Rx de-emphasis filter. 0=Enable;1=Disable.
     pub afrx_deemp_disable: bool,
     /// Disable AF Rx LPF 3K filter. 0=Enable;1=Disable.
@@ -1152,19 +846,19 @@ pub struct Reg2B {
     /// Disable AF Rx HPF 300 filter. 0=Enable;1=Disable.
     pub afrx_hpf300_disable: bool,
     #[bits(5)]
-    __1: u8,
+    pub undocumented_1: u8,
 }
 
 /// REG_2E: CTCSS/CDCSS Tx Gain2 tuning (after Gain1).
 #[bitfield(u16)]
 pub struct Reg2E {
     #[bits(8)]
-    __0: u8,
+    pub undocumented_0: u8,
     /// CTCSS/CDCSS Tx Gain2 Tuning. 00=12dB;01=6dB;10=0dB;11=-6dB
     #[bits(2)]
     pub ctc_gain2: u8,
     #[bits(6)]
-    __1: u8,
+    pub undocumented_1: u8,
 }
 
 /// REG_30: Top-level enable bits.
@@ -1189,7 +883,7 @@ pub struct Reg30 {
     #[bits(4)]
     pub rx_link_en: u8,
     #[bits(1)]
-    __0: bool,
+    pub undocumented: bool,
     /// VCO Calibration Enable.
     pub vco_cal_en: bool,
 }
@@ -1198,7 +892,7 @@ pub struct Reg30 {
 #[bitfield(u16)]
 pub struct Reg31 {
     #[bits(1)]
-    __0: bool,
+    pub undocumented_0: bool,
     /// Enable Scramble Function.
     pub scramble_en: bool,
     /// Enable VOX detection.
@@ -1206,7 +900,7 @@ pub struct Reg31 {
     /// Enable Compander Function.
     pub compander_en: bool,
     #[bits(12)]
-    __1: u16,
+    pub undocumented_1: u16,
 }
 
 /// REG_32: Frequency scan control.
@@ -1215,13 +909,14 @@ pub struct Reg32 {
     /// FrequencyScan Enable.
     pub scan_en: bool,
     #[bits(13)]
-    __0: u16,
+    undocumented: u16,
     /// FrequencyScan Time. 00=0.2s;01=0.4s;10=0.8s;11=1.6s
     #[bits(2)]
     pub scan_time: u8,
 }
 
 /// REG_33: GPIO output control.
+#[address(0x33)]
 #[bitfield(u16)]
 pub struct Reg33 {
     /// GPIOs Output Value (when enabled).
@@ -1240,7 +935,7 @@ pub struct Reg34 {
     pub gpio6_type: Reg34Gpio6Type,
 
     #[bits(4)]
-    pub undocumented_1: u8,
+    pub undocumented: u8,
     /// GPIO5 Output Type Selection.
     #[bits(4)]
     pub gpio5_type: Reg34Gpio5Type,
@@ -1267,6 +962,7 @@ pub struct Reg35 {
 }
 
 /// REG_36: PA control: bias output + gains.
+#[address(0x36)]
 #[bitfield(u16)]
 pub struct Reg36 {
     /// PA Gain2 Tuning. 111(max)->000(min).
@@ -1276,7 +972,7 @@ pub struct Reg36 {
     #[bits(3)]
     pub pa_gain1: u8,
     #[bits(1)]
-    __0: bool,
+    pub undocumented_0: bool,
     /// Enable PACTL output; 0=Disable (0V).
     pub pa_ctl_output: bool,
     /// PA Bias output 0~3.2V (0x00=0V ... 0xFF=3.2V)
@@ -1285,6 +981,7 @@ pub struct Reg36 {
 }
 
 /// REG_37: Power/LDO control and enables.
+#[address(0x37)]
 #[bitfield(u16)]
 pub struct Reg37 {
     /// Band-Gap Enable.
@@ -1294,7 +991,7 @@ pub struct Reg37 {
     /// DSP Enable.
     pub dsp_en: bool,
     #[bits(1)]
-    pub undocumented_1: bool,
+    pub undocumented_0: bool,
     /// PLL LDO Bypass. 1=Bypass,0=Enable
     pub pll_ldo_byp: bool,
     /// RF LDO Bypass. 1=Bypass,0=Enable
@@ -1315,10 +1012,11 @@ pub struct Reg37 {
     #[bits(3)]
     pub dsp_volt: u8,
     #[bits(1)]
-    __1: bool,
+    pub undocumented_1: bool,
 }
 
 /// REG_38: Frequency low 16 bits. Frequency(Hz)=(hi<<16 + lo)*10
+#[address(0x38)]
 #[bitfield(u16)]
 pub struct Reg38 {
     /// Frequency low 16 bits.
@@ -1327,6 +1025,7 @@ pub struct Reg38 {
 }
 
 /// REG_39: Frequency high 16 bits. Frequency(Hz)=(hi<<16 + lo)*10
+#[address(0x39)]
 #[bitfield(u16)]
 pub struct Reg39 {
     /// Frequency high 16 bits.
@@ -1346,7 +1045,7 @@ pub struct Reg3B {
 #[bitfield(u16)]
 pub struct Reg3C {
     #[bits(6)]
-    __0: u8,
+    undocumented: u8,
     /// Crystal Frequency Mode Selection.
     #[bits(2)]
     pub xtal_mode: Reg3CXtalMode,
@@ -1364,6 +1063,7 @@ pub struct Reg3D {
 }
 
 /// REG_3E: Band Selection Threshold (~= VCO Max Frequency(Hz)/96/640).
+#[address(0x3E)]
 #[bitfield(u16)]
 pub struct Reg3E {
     /// Band selection threshold.
@@ -1372,9 +1072,10 @@ pub struct Reg3E {
 }
 
 /// REG_3F: Interrupt enable bits.
+#[address(0x3F)]
 #[bitfield(u16)]
 pub struct Reg3F {
-    pub _undocumented: bool,
+    pub undocumented: bool,
     /// FSK Rx Sync Interrupt Enable.
     pub fsk_rx_sync_en: bool,
     /// Squelch Lost Interrupt Enable.
@@ -1416,18 +1117,18 @@ pub struct Reg40 {
     /// Enable RF Tx Deviation.
     pub rf_tx_dev_en: bool,
     #[bits(3)]
-    __0: u8,
+    undocumented: u8,
 }
 
 /// REG_43: RF/AF bandwidth and demod gain settings.
 #[bitfield(u16)]
 pub struct Reg43 {
     #[bits(2)]
-    __0: u8,
+    undocumented_0: u8,
     /// Gain after FM Demodulation. 1=6dB;0=0dB
     pub fm_demod_gain: bool,
     #[bits(1)]
-    __: u8,
+    undocumented_1: u8,
     /// BW Mode Selection. 00=12.5k;01=6.25k;10=25k/20k
     #[bits(2)]
     pub bw_mode: u8,
@@ -1441,7 +1142,7 @@ pub struct Reg43 {
     #[bits(3)]
     pub rf_bw_strong: u8,
     #[bits(1)]
-    __1: u8,
+    undocumented_2: u8,
 }
 
 /// REG_44: 300Hz AF response coefficient for Tx (part 1).
@@ -1467,7 +1168,7 @@ pub struct Reg46 {
     #[bits(11)]
     pub vox1_thresh: u16,
     #[bits(5)]
-    __0: u8,
+    undocumented: u8,
 }
 
 /// REG_47: AF output selection / invert and Tx filter bypass.
@@ -1476,19 +1177,20 @@ pub struct Reg47 {
     /// AF Tx Filter Bypass All. 1=Bypass;0=Normal.
     pub aftx_filter_bypass_all: bool,
     #[bits(7)]
-    __0: u8,
+    undocumented_0: u8,
     /// AF Output Selection.
     #[bits(4)]
     pub af_output_selection: Reg47AfOutSel,
     #[bits(1)]
-    __: u8,
+    undocumented_1: u8,
     /// AF Output Inverse Mode. 1=Inverse.
     pub af_out_invert: bool,
     #[bits(2)]
-    __: u8,
+    undocumented_2: u8,
 }
 
 /// REG_48: AF Rx gain and DAC gain settings.
+#[address(0x48)]
 #[bitfield(u16)]
 pub struct Reg48 {
     /// AF DAC Gain (after Gain1+Gain2). 1111=max;0000=min
@@ -1508,11 +1210,11 @@ pub struct Reg48 {
 #[bitfield(u16)]
 pub struct Reg4B {
     #[bits(5)]
-    __0: u8,
+    undocumented_0: u8,
     /// AF Level Controller (ALC) Disable. 1=Disable;0=Enable.
     pub alc_disable: bool,
     #[bits(10)]
-    __1: u16,
+    undocumented_1: u16,
 }
 
 /// REG_4D: Glitch threshold for Squelch=0.
@@ -1522,7 +1224,7 @@ pub struct Reg4D {
     #[bits(8)]
     pub glitch_th0: u8,
     #[bits(8)]
-    __0: u8,
+    undocumented: u8,
 }
 
 /// REG_4E: Squelch delay + glitch threshold for Squelch=1.
@@ -1532,7 +1234,7 @@ pub struct Reg4E {
     #[bits(8)]
     pub glitch_th1: u8,
     #[bits(1)]
-    __: u8,
+    undocumented_0: u8,
     /// Squelch=0 Delay Setting.
     #[bits(2)]
     pub sq0_delay: u8,
@@ -1540,7 +1242,7 @@ pub struct Reg4E {
     #[bits(3)]
     pub sq1_delay: u8,
     #[bits(2)]
-    __: u8,
+    undocumented_1: u8,
 }
 
 /// REG_4F: Ex-noise thresholds for squelch.
@@ -1550,19 +1252,19 @@ pub struct Reg4F {
     #[bits(7)]
     pub exnoise_th1: u8,
     #[bits(1)]
-    __0: bool,
+    undocumented_0: bool,
     /// Ex-noise threshold for Squelch=0.
     #[bits(7)]
     pub exnoise_th0: u8,
     #[bits(1)]
-    __1: bool,
+    undocumented_1: bool,
 }
 
 /// REG_50: AF Tx mute control.
 #[bitfield(u16)]
 pub struct Reg50 {
     #[bits(15)]
-    __0: u16,
+    undocumented: u16,
     /// Enable AF Tx Mute. 1=Mute;0=Normal.
     pub aftx_mute: bool,
 }
@@ -1574,7 +1276,7 @@ pub struct Reg51 {
     #[bits(7)]
     pub tx_gain1: u8,
     #[bits(1)]
-    __: u8,
+    undocumented: u8,
     /// Auto CTCSS BW Mode. 1=Disable;0=Enable
     pub auto_ctcss_bw_disable: bool,
     /// Auto CDCSS BW Mode. 1=Disable;0=Enable
@@ -1639,7 +1341,7 @@ pub struct Reg58 {
     #[bits(2)]
     pub preamble_type: u8,
     #[bits(2)]
-    __0: u8,
+    undocumented: u8,
     /// FSK Rx Gain.
     #[bits(2)]
     pub fsk_rx_gain: u8,
@@ -1655,14 +1357,14 @@ pub struct Reg58 {
 #[bitfield(u16)]
 pub struct Reg59 {
     #[bits(3)]
-    __0: u8,
+    undocumented_0: u8,
     /// FSK Sync Length Selection. 1=4 bytes;0=2 bytes.
     pub sync_len: bool,
     /// FSK Preamble Length Selection (0=1 byte ... 15=16 bytes).
     #[bits(4)]
     pub preamble_len: u8,
     #[bits(1)]
-    __: u8,
+    undocumented_1: u8,
     /// Invert FSK data when TX.
     pub inv_data_tx: bool,
     /// Invert FSK data when RX.
@@ -1705,18 +1407,18 @@ pub struct Reg5B {
 #[bitfield(u16)]
 pub struct Reg5C {
     #[bits(6)]
-    __0: u8,
+    undocumented_0: u8,
     /// CRC Option Enable. 1=Enable;0=Disable.
     pub crc_en: bool,
     #[bits(9)]
-    __1: u16,
+    undocumented_1: u16,
 }
 
 /// REG_5D: FSK data length (11 bits total for BK4819v3).
 #[bitfield(u16)]
 pub struct Reg5D {
     #[bits(5)]
-    __0: u8,
+    undocumented: u8,
     /// FSK Data Length high 3 bits.
     #[bits(3)]
     pub len_hi: u8,
@@ -1735,7 +1437,7 @@ pub struct Reg5E {
     #[bits(7)]
     pub tx_ae_th: u8,
     #[bits(6)]
-    __0: u8,
+    undocumented: u8,
 }
 
 /// REG_5F: FSK word input/output.
@@ -1753,7 +1455,7 @@ pub struct Reg63 {
     #[bits(8)]
     pub glitch: u8,
     #[bits(8)]
-    __0: u8,
+    undocumented: u8,
 }
 
 /// REG_64: Voice amplitude out (read-only).
@@ -1771,17 +1473,18 @@ pub struct Reg65 {
     #[bits(7)]
     pub exnoise: u8,
     #[bits(9)]
-    __0: u16,
+    undocumented: u16,
 }
 
 /// REG_67: RSSI (read-only). dBm ~= REG/2 - 160.
+#[address(0x67)]
 #[bitfield(u16)]
 pub struct Reg67 {
     /// RSSI value (0.5 dB/step).
     #[bits(9)]
     pub rssi: u16,
     #[bits(7)]
-    __0: u8,
+    undocumented: u8,
 }
 
 /// REG_68: CTCSS scan indicator+frequency (read-only).
@@ -1791,7 +1494,7 @@ pub struct Reg68 {
     #[bits(13)]
     pub freq_word: u16,
     #[bits(2)]
-    __0: u8,
+    undocumented: u8,
     /// CTCSS Scan Indicator. 1=Busy;0=Found.
     pub busy: bool,
 }
@@ -1803,7 +1506,7 @@ pub struct Reg69 {
     #[bits(12)]
     pub code_hi: u16,
     #[bits(2)]
-    __0: u8,
+    undocumented: u8,
     /// 23/24-bit indicator (BK4819v3). 1=24bit;0=23bit.
     pub is_24bit: bool,
     /// CDCSS Scan Indicator. 1=Busy;0=Found.
@@ -1817,7 +1520,7 @@ pub struct Reg6A {
     #[bits(12)]
     pub code_lo: u16,
     #[bits(4)]
-    __0: u8,
+    undocumented: u8,
 }
 
 /// REG_6F: AF Tx/Rx input amplitude (read-only).
@@ -1827,7 +1530,7 @@ pub struct Reg6F {
     #[bits(7)]
     pub af_amp_db: u8,
     #[bits(9)]
-    __0: u16,
+    undocumented: u16,
 }
 
 /// REG_70: Tone enable and gain.
@@ -1865,16 +1568,16 @@ pub struct Reg72 {
 #[bitfield(u16)]
 pub struct Reg73 {
     #[bits(4)]
-    __0: u8,
+    undocumented_0: u8,
     /// Automatic Frequency Correction Disable. 1=Disable;0=Enable.
     pub afc_disable: bool,
     #[bits(6)]
-    __1: u8,
+    undocumented_1: u8,
     /// AFC Range Selection. 000=max;111=min
     #[bits(3)]
     pub afc_range: u8,
     #[bits(2)]
-    __2: u8,
+    undocumented_2: u8,
 }
 
 /// REG_74: 3000Hz AF response coefficient for Tx.
@@ -1919,13 +1622,14 @@ pub struct Reg79 {
 #[bitfield(u16)]
 pub struct Reg7A {
     #[bits(12)]
-    __0: u16,
+    undocumented: u16,
     /// VOX=0 Detection delay (multiplier *128ms).
     #[bits(4)]
     pub vox0_delay: u8,
 }
 
 /// REG_7D: MIC sensitivity tuning.
+#[address(0x7D)]
 #[bitfield(u16)]
 pub struct Reg7D {
     /// MIC Sensitivity Tuning. 0=min;0x1F=max;0.5dB/step.
@@ -1936,6 +1640,7 @@ pub struct Reg7D {
 }
 
 /// REG_7E: AGC and DC filter bandwidth settings.
+#[address(0x7E)]
 #[bitfield(u16)]
 pub struct Reg7E {
     /// DC Filter Bandwidth for Rx (IF in). 000=Bypass.
@@ -1945,7 +1650,7 @@ pub struct Reg7E {
     #[bits(3)]
     pub dcf_bw_tx: u8,
     #[bits(6)]
-    __0: u8,
+    undocumented: u8,
     /// AGC Fix Index. 011=max ... 100=min.
     #[bits(3)]
     pub agc_fix_index: u8,

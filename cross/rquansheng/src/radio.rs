@@ -12,7 +12,7 @@ use embedded_hal::delay::DelayNs;
 use crate::bk4819::regs::Register_old;
 use crate::bk4819::{AfType, Bk4819Driver, FilterBandwidth, GpioPin};
 use crate::bk4819_bitbang::Bk4819Bus;
-use crate::bk4819_n::{Reg3F, Register};
+use crate::bk4819_n::Reg3F;
 use crate::delay::DecentDelay;
 use crate::dialer::Dialer;
 use crate::display::RenderingMgr;
@@ -179,11 +179,11 @@ where
         let thresholds = default_squelch_thresholds(self.channel_cfg.freq);
         self.bk.setup_squelch(thresholds)?;
 
-        self.bk.write_register_n(Register::Reg3F(
+        self.bk.write_register_n(
             Reg3F::new()
                 .with_squelch_found_en(true)
                 .with_squelch_lost_en(true),
-        ))?;
+        )?;
 
         // Start muted; tick task will unmute on squelch-open event.
         let _ = self.bk.set_af(AfType::Mute);

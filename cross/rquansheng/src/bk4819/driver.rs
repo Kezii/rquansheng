@@ -4,18 +4,18 @@ use embedded_hal::delay::DelayNs;
 
 use crate::{
     bk4819_bitbang::{Bk4819, Bk4819Bus},
-    bk4819_n::{self, Reg00, Reg67, Register},
+    bk4819_n::{self, Reg67},
     radio::SquelchThresholds,
 };
 
 use super::regs::{
-    GpioPin as RegGpioPin, RegisterSpec, Register_old, REG_07_MODE_CDCSS, REG_07_MODE_CTC1,
-    REG_07_MODE_CTC2, REG_24_ENABLE, REG_24_SELECT_DTMF, REG_24_SHIFT_MAX_SYMBOLS,
-    REG_24_SHIFT_THRESHOLD, REG_24_SHIFT_UNKNOWN_15, REG_24_SHIFT_UNKNOWN_6,
-    REG_30_DISABLE_MIC_ADC, REG_30_DISABLE_PA_GAIN, REG_30_DISABLE_RX_DSP, REG_30_DISABLE_RX_LINK,
-    REG_30_DISABLE_TX_DSP, REG_30_DISABLE_UNKNOWN, REG_30_ENABLE_AF_DAC, REG_30_ENABLE_DISC_MODE,
-    REG_30_ENABLE_PA_GAIN, REG_30_ENABLE_PLL_VCO, REG_30_ENABLE_RX_DSP, REG_30_ENABLE_RX_LINK,
-    REG_30_ENABLE_TX_DSP, REG_30_ENABLE_UNKNOWN, REG_30_ENABLE_VCO_CALIB, REG_51_1050HZ_DETECTION,
+    GpioPin as RegGpioPin, Register_old, REG_07_MODE_CDCSS, REG_07_MODE_CTC1, REG_07_MODE_CTC2,
+    REG_24_ENABLE, REG_24_SELECT_DTMF, REG_24_SHIFT_MAX_SYMBOLS, REG_24_SHIFT_THRESHOLD,
+    REG_24_SHIFT_UNKNOWN_15, REG_24_SHIFT_UNKNOWN_6, REG_30_DISABLE_MIC_ADC,
+    REG_30_DISABLE_PA_GAIN, REG_30_DISABLE_RX_DSP, REG_30_DISABLE_RX_LINK, REG_30_DISABLE_TX_DSP,
+    REG_30_DISABLE_UNKNOWN, REG_30_ENABLE_AF_DAC, REG_30_ENABLE_DISC_MODE, REG_30_ENABLE_PA_GAIN,
+    REG_30_ENABLE_PLL_VCO, REG_30_ENABLE_RX_DSP, REG_30_ENABLE_RX_LINK, REG_30_ENABLE_TX_DSP,
+    REG_30_ENABLE_UNKNOWN, REG_30_ENABLE_VCO_CALIB, REG_51_1050HZ_DETECTION,
     REG_51_1050HZ_NO_DETECTION, REG_51_AUTO_CDCSS_BW_DISABLE, REG_51_AUTO_CDCSS_BW_ENABLE,
     REG_51_AUTO_CTCSS_BW_DISABLE, REG_51_AUTO_CTCSS_BW_ENABLE, REG_51_CDCSS_23_BIT,
     REG_51_DISABLE_CXCSS, REG_51_ENABLE_CXCSS, REG_51_GPIO6_PIN2_NORMAL, REG_51_MODE_CDCSS,
@@ -137,16 +137,15 @@ where
         self.bk.write_reg(reg.as_u8(), value)
     }
 
-    pub fn write_register_n(&mut self, reg: bk4819_n::Register) -> Result<(), BUS::Error> {
+    pub fn write_register_n<R: bk4819_n::Bk4819Register>(
+        &mut self,
+        reg: R,
+    ) -> Result<(), BUS::Error> {
         self.bk.write_reg_n(reg)
     }
 
-    // TODO: this api fucking sucks
-    pub fn read_register_n(
-        &mut self,
-        reg: bk4819_n::Register,
-    ) -> Result<bk4819_n::Register, BUS::Error> {
-        self.bk.read_reg_n(reg)
+    pub fn read_register_n<R: bk4819_n::Bk4819Register>(&mut self) -> Result<R, BUS::Error> {
+        self.bk.read_reg_n::<R>()
     }
 
     /// Port of `scale_freq()` from the C firmware.
@@ -161,43 +160,36 @@ where
 
     /// Port of `BK4819_Init()`.
     pub fn init(&mut self) -> Result<(), BUS::Error> {
-        use bk4819_n::Register;
         use bk4819_n::{Reg00, Reg36, Reg37};
         // Soft reset
-        self.write_register_n(Register::Reg00(
-            Reg00::new().with_soft_reset(bk4819_n::Reg00SoftReset::Reset),
-        ))?;
-        self.write_register_n(Register::Reg00(
-            Reg00::new().with_soft_reset(bk4819_n::Reg00SoftReset::Normal),
-        ))?;
+        self.write_register_n(Reg00::new().with_soft_reset(bk4819_n::Reg00SoftReset::Reset))?;
+        self.write_register_n(Reg00::new().with_soft_reset(bk4819_n::Reg00SoftReset::Normal))?;
 
         //self.write_register(Register::Reg37, 0x1D0F)?; // 0b0 001 1101 00001111
-        self.write_register_n(Register::Reg37(
+        self.write_register_n(
             Reg37::new()
                 .with_bg_en(true)
                 .with_xtal_en(true)
                 .with_dsp_en(true)
-                .with_undocumented_1(true)
+                .with_undocumented_0(true)
                 .with_pll_ldo_sel(true)
                 .with_vco_ldo_sel(true)
                 .with_ana_ldo_sel(true)
                 .with_dsp_volt(1),
-        ))?;
+        )?;
 
-        self.write_register_n(Register::Reg36(
-            Reg36::new().with_pa_gain2(0b010).with_pa_gain1(0b100),
-        ))?;
+        self.write_register_n(Reg36::new().with_pa_gain2(0b010).with_pa_gain1(0b100))?;
 
         self.init_agc(false)?;
         self.set_agc(true)?;
 
         // REG_19: <15> MIC AGC 1=disable 0=enable
         //self.write_register(Register::Reg19, 0b0001_0000_0100_0001)?;
-        self.write_register_n(bk4819_n::Register::Reg19(
+        self.write_register_n(
             bk4819_n::Reg19::new()
                 .with_mic_agc_disable(false)
                 .with_undocumented_1(0b001000001000001),
-        ))?;
+        )?;
 
         // REG_7D: mic gain tuning (0.5 dB/step, 0..=31) in the low 5 bits.
         // No EEPROM is available here, so use a sensible default.
@@ -207,47 +199,45 @@ where
 
         // REG_48 .. RX AF level (see C comments)
         //self.write_register(Register::Reg48, (11u16 << 12) | (58u16 << 4) | 8u16)?;
-        self.write_register_n(bk4819_n::Register::Reg48(
+        self.write_register_n(
             bk4819_n::Reg48::new()
                 .with_af_dac_gain(8)
                 .with_afrx_gain2(58)
                 .with_afrx_gain1(0)
                 .with_undocumented(11),
-        ))?;
+        )?;
 
         // DTMF coefficients table
         const DTMF_COEFFS: [u16; 16] = [
             111, 107, 103, 98, 80, 71, 58, 44, 65, 55, 37, 23, 228, 203, 181, 159,
         ];
         for (i, &c) in DTMF_COEFFS.iter().enumerate() {
-            self.write_register_n(bk4819_n::Register::Reg09(
+            self.write_register_n(
                 bk4819_n::Reg09::new()
                     .with_coefficient(c as u8)
                     .with_symbol_number(i as u8),
-            ))?;
+            )?;
         }
 
         //self.write_register(crate::bk4819::regs::Register::Reg1F, 0x5454)?;
-        self.write_register_n(bk4819_n::Register::Reg1F(
+        self.write_register_n(
             bk4819_n::Reg1F::new()
                 .with_pll_cp_bit(4)
                 .with_undocumented(0b10101000101),
-        ))?;
+        )?;
 
         //self.write_register(Register::Reg3E, 0xA037)?;
-        self.write_register_n(bk4819_n::Register::Reg3E(
-            bk4819_n::Reg3E::new().with_band_thresh(0xA037),
-        ))?;
+        self.write_register_n(bk4819_n::Reg3E::new().with_band_thresh(0xA037))?;
 
         self.gpio_out_state = 0x9000;
         //self.write_register(Register::Reg33, self.gpio_out_state)?;
-        self.write_register_n(bk4819_n::Register::Reg33(
+        self.write_register_n(
             bk4819_n::Reg33::new()
                 .with_gpio_out_disable((self.gpio_out_state >> 8) as u8)
                 .with_gpio_out_value(0x00),
-        ))?;
+        )?;
         //self.write_register(Register::Reg3F, 0x0000)?;
-        self.write_register_n(bk4819_n::Register::Reg3F(bk4819_n::Reg3F::new()))?;
+        self.write_register_n(bk4819_n::Reg3F::new())?;
 
         Ok(())
     }
@@ -257,27 +247,34 @@ where
     /// `gain` is in 0.5 dB/step, 0..=31.
     pub fn set_mic_gain(&mut self, gain: u8) -> Result<(), BUS::Error> {
         //self.write_register(Register::Reg7D, 0xE940 | gain)
-        self.write_register_n(bk4819_n::Register::Reg7D(
+        self.write_register_n(
             bk4819_n::Reg7D::new()
                 .with_mic_sens(gain)
                 .with_undocumented(0b11101001010),
-        ))?;
+        )?;
 
         Ok(())
     }
 
     /// Port of `BK4819_SetAGC(enable)`.
     pub fn set_agc(&mut self, enable: bool) -> Result<(), BUS::Error> {
-        let reg_val = self.read_register_old(Register_old::Reg7E)?;
+        // REG_7E layout is modeled in `bk4819_n::Reg7E`:
+        // - bit15: AGC fix mode (1=fix => AGC off, 0=auto => AGC on)
+        // - bits14:12: AGC fix index
+        // Everything else (including undocumented bits) must be preserved.
+        let r7e: bk4819_n::Reg7E = self.read_register_n::<bk4819_n::Reg7E>()?;
+
         // C uses: if(!(regVal & (1<<15)) == enable) return;
-        let currently_enabled = (reg_val & (1u16 << 15)) == 0;
+        let currently_enabled = !r7e.agc_fix_mode();
         if currently_enabled == enable {
             return Ok(());
         }
-        let next = (reg_val & !(1u16 << 15) & !(0b111u16 << 12))
-            | ((!enable as u16) << 15) // 0=auto(AGC on), 1=fix(AGC off)
-            | (3u16 << 12); // fix index
-        self.write_register_old(Register_old::Reg7E, next)
+
+        let next = r7e
+            .with_agc_fix_mode(!enable) // 0=auto (AGC on), 1=fix (AGC off)
+            .with_agc_fix_index(3); // fix index (matches reference firmware)
+
+        self.write_register_n(next)
     }
 
     /// Port of `BK4819_InitAGC(amModulation)`.
@@ -442,12 +439,8 @@ where
     pub fn set_frequency(&mut self, frequency_hz: u32) -> Result<(), BUS::Error> {
         let frequency_10hz = frequency_hz / 10;
 
-        self.write_register_n(bk4819_n::Register::Reg38(
-            bk4819_n::Reg38::new().with_freq_lo(frequency_10hz as u16),
-        ))?;
-        self.write_register_n(bk4819_n::Register::Reg39(
-            bk4819_n::Reg39::new().with_freq_hi((frequency_10hz >> 16) as u16),
-        ))?;
+        self.write_register_n(bk4819_n::Reg38::new().with_freq_lo(frequency_10hz as u16))?;
+        self.write_register_n(bk4819_n::Reg39::new().with_freq_hi((frequency_10hz >> 16) as u16))?;
         Ok(())
     }
 
@@ -912,12 +905,8 @@ where
     // --- Indicators / measurements -----------------------------------------
 
     pub fn get_rssi(&mut self) -> Result<u16, BUS::Error> {
-        let r67 = Register::Reg67(Reg67::new()).read(self)?;
-        if let Register::Reg67(r) = r67 {
-            Ok(r.rssi())
-        } else {
-            panic!();
-        }
+        let r67: Reg67 = self.read_register_n::<Reg67>()?;
+        Ok(r67.rssi())
     }
 
     pub fn get_rssi_dbm(&mut self) -> Result<i16, BUS::Error> {

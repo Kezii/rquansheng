@@ -136,17 +136,18 @@ impl Bk4819Bus for DummyRadioBus {
         Ok(0)
     }
 
-    fn write_reg_n(&mut self, reg: rquansheng::bk4819_n::Register) -> Result<(), Self::Error> {
+    fn write_reg_n<R: rquansheng::bk4819_n::Bk4819Register>(
+        &mut self,
+        reg: R,
+    ) -> Result<(), Self::Error> {
         info!("write_reg_n: {:?}", reg);
         Ok(())
     }
 
-    fn read_reg_n(
-        &mut self,
-        reg: rquansheng::bk4819_n::Register,
-    ) -> Result<rquansheng::bk4819_n::Register, Self::Error> {
-        info!("read_reg_n: {:?}", reg);
-        Ok(reg)
+    fn read_reg_n<R: rquansheng::bk4819_n::Bk4819Register>(&mut self) -> Result<R, Self::Error> {
+        let ret = R::default();
+        info!("read_reg_n: {:?}", ret);
+        Ok(ret)
     }
 }
 

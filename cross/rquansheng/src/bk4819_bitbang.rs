@@ -51,8 +51,8 @@ pub trait Bk4819Bus {
     fn write_reg(&mut self, reg: u8, value: u16) -> Result<(), Self::Error>;
     fn read_reg(&mut self, reg: u8) -> Result<u16, Self::Error>;
 
-    fn write_reg_n(&mut self, reg: bk4819_n::Register) -> Result<(), Self::Error>;
-    fn read_reg_n(&mut self, reg: bk4819_n::Register) -> Result<bk4819_n::Register, Self::Error>;
+    fn write_reg_n<R: bk4819_n::Bk4819Register>(&mut self, reg: R) -> Result<(), Self::Error>;
+    fn read_reg_n<R: bk4819_n::Bk4819Register>(&mut self) -> Result<R, Self::Error>;
 }
 
 /// Bit-banged BK4819 bus implementation.
@@ -241,21 +241,20 @@ where
         Ok(())
     }
 
-    pub fn write_reg_n(
+    pub fn write_reg_n<R: bk4819_n::Bk4819Register>(
         &mut self,
-        reg: bk4819_n::Register,
+        reg: R,
     ) -> Result<(), Error<SCN::Error, SCL::Error, SDA::Error>> {
-        self.write_reg_raw(reg.as_u8(), reg.serialize())?;
+        self.write_reg_raw(R::ADDRESS, reg.serialize())?;
 
         Ok(())
     }
 
-    pub fn read_reg_n(
+    pub fn read_reg_n<R: bk4819_n::Bk4819Register>(
         &mut self,
-        reg: bk4819_n::Register,
-    ) -> Result<bk4819_n::Register, Error<SCN::Error, SCL::Error, SDA::Error>> {
-        let value = self.read_reg_raw(reg.as_u8())?;
-        Ok(bk4819_n::Register::deserialize(&reg, value))
+    ) -> Result<R, Error<SCN::Error, SCL::Error, SDA::Error>> {
+        let value = self.read_reg_raw(R::ADDRESS)?;
+        Ok(<R as bk4819_n::Bk4819Register>::deserialize(value))
     }
 }
 
@@ -279,13 +278,13 @@ where
     }
 
     #[inline]
-    fn write_reg_n(&mut self, reg: bk4819_n::Register) -> Result<(), Self::Error> {
-        self.write_reg_n(reg)
+    fn write_reg_n<R: bk4819_n::Bk4819Register>(&mut self, reg: R) -> Result<(), Self::Error> {
+        Bk4819BitBang::write_reg_n(self, reg)
     }
 
     #[inline]
-    fn read_reg_n(&mut self, reg: bk4819_n::Register) -> Result<bk4819_n::Register, Self::Error> {
-        self.read_reg_n(reg)
+    fn read_reg_n<R: bk4819_n::Bk4819Register>(&mut self) -> Result<R, Self::Error> {
+        Bk4819BitBang::read_reg_n::<R>(self)
     }
 }
 
@@ -321,16 +320,13 @@ where
     }
 
     #[inline]
-    pub fn write_reg_n(&mut self, reg: bk4819_n::Register) -> Result<(), BUS::Error> {
+    pub fn write_reg_n<R: bk4819_n::Bk4819Register>(&mut self, reg: R) -> Result<(), BUS::Error> {
         self.bus.write_reg_n(reg)
     }
 
     #[inline]
-    pub fn read_reg_n(
-        &mut self,
-        reg: bk4819_n::Register,
-    ) -> Result<bk4819_n::Register, BUS::Error> {
-        self.bus.read_reg_n(reg)
+    pub fn read_reg_n<R: bk4819_n::Bk4819Register>(&mut self) -> Result<R, BUS::Error> {
+        self.bus.read_reg_n::<R>()
     }
 
     /// Read-modify-write helper.
