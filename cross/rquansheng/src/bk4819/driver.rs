@@ -4,7 +4,7 @@ use embedded_hal::delay::DelayNs;
 
 use crate::{
     bk4819_bitbang::{Bk4819, Bk4819Bus},
-    bk4819_n::{self, Reg67},
+    bk4819_n::*,
     radio::SquelchThresholds,
 };
 
@@ -165,12 +165,11 @@ where
 
     /// Port of `BK4819_Init()`.
     pub fn init(&mut self) -> Result<(), BUS::Error> {
-        use bk4819_n::{Reg00, Reg36, Reg37};
         // Soft reset
         self.bitbang
-            .write_reg(Reg00::new().with_soft_reset(bk4819_n::Reg00SoftReset::Reset))?;
+            .write_reg(Reg00::new().with_soft_reset(Reg00SoftReset::Reset))?;
         self.bitbang
-            .write_reg(Reg00::new().with_soft_reset(bk4819_n::Reg00SoftReset::Normal))?;
+            .write_reg(Reg00::new().with_soft_reset(Reg00SoftReset::Normal))?;
 
         //self.write_register(Register::Reg37, 0x1D0F)?; // 0b0 001 1101 00001111
         self.bitbang.write_reg(
@@ -194,7 +193,7 @@ where
         // REG_19: <15> MIC AGC 1=disable 0=enable
         //self.write_register(Register::Reg19, 0b0001_0000_0100_0001)?;
         self.bitbang.write_reg(
-            bk4819_n::Reg19::new()
+            Reg19::new()
                 .with_mic_agc_disable(false)
                 .with_undocumented_1(0b001000001000001),
         )?;
@@ -208,7 +207,7 @@ where
         // REG_48 .. RX AF level (see C comments)
         //self.write_register(Register::Reg48, (11u16 << 12) | (58u16 << 4) | 8u16)?;
         self.bitbang.write_reg(
-            bk4819_n::Reg48::new()
+            Reg48::new()
                 .with_af_dac_gain(8)
                 .with_afrx_gain2(58)
                 .with_afrx_gain1(0)
@@ -221,7 +220,7 @@ where
         ];
         for (i, &c) in DTMF_COEFFS.iter().enumerate() {
             self.bitbang.write_reg(
-                bk4819_n::Reg09::new()
+                Reg09::new()
                     .with_coefficient(c as u8)
                     .with_symbol_number(i as u8),
             )?;
@@ -229,24 +228,24 @@ where
 
         //self.write_register(crate::bk4819::regs::Register::Reg1F, 0x5454)?;
         self.bitbang.write_reg(
-            bk4819_n::Reg1F::new()
+            Reg1F::new()
                 .with_pll_cp_bit(4)
                 .with_undocumented(0b10101000101),
         )?;
 
         //self.write_register(Register::Reg3E, 0xA037)?;
         self.bitbang
-            .write_reg(bk4819_n::Reg3E::new().with_band_thresh(0xA037))?;
+            .write_reg(Reg3E::new().with_band_thresh(0xA037))?;
 
         self.gpio_out_state = 0x9000;
         //self.write_register(Register::Reg33, self.gpio_out_state)?;
         self.bitbang.write_reg(
-            bk4819_n::Reg33::new()
+            Reg33::new()
                 .with_gpio_out_disable((self.gpio_out_state >> 8) as u8)
                 .with_gpio_out_value(0x00),
         )?;
         //self.write_register(Register::Reg3F, 0x0000)?;
-        self.bitbang.write_reg(bk4819_n::Reg3F::new())?;
+        self.bitbang.write_reg(Reg3F::new())?;
 
         Ok(())
     }
@@ -257,7 +256,7 @@ where
     pub fn set_mic_gain(&mut self, gain: u8) -> Result<(), BUS::Error> {
         //self.write_register(Register::Reg7D, 0xE940 | gain)
         self.bitbang.write_reg(
-            bk4819_n::Reg7D::new()
+            Reg7D::new()
                 .with_mic_sens(gain)
                 .with_undocumented(0b11101001010),
         )?;
@@ -267,7 +266,7 @@ where
 
     /// Port of `BK4819_SetAGC(enable)`.
     pub fn set_agc(&mut self, enable: bool) -> Result<(), BUS::Error> {
-        let r7e = self.bitbang.read_reg::<bk4819_n::Reg7E>()?;
+        let r7e = self.bitbang.read_reg::<Reg7E>()?;
 
         if r7e.agc_fix_mode() != enable {
             return Ok(());
@@ -443,9 +442,9 @@ where
         let frequency_10hz = frequency_hz / 10;
 
         self.bitbang
-            .write_reg(bk4819_n::Reg38::new().with_freq_lo(frequency_10hz as u16))?;
+            .write_reg(Reg38::new().with_freq_lo(frequency_10hz as u16))?;
         self.bitbang
-            .write_reg(bk4819_n::Reg39::new().with_freq_hi((frequency_10hz >> 16) as u16))?;
+            .write_reg(Reg39::new().with_freq_hi((frequency_10hz >> 16) as u16))?;
         Ok(())
     }
 
@@ -712,7 +711,7 @@ where
     /// disable mic for tone transmission
     pub fn enter_tx_mute(&mut self) -> Result<(), BUS::Error> {
         self.bitbang.write_reg(
-            bk4819_n::Reg50::new()
+            Reg50::new()
                 .with_aftx_mute(true)
                 .with_undocumented(0b11101100100000),
         )?;
@@ -722,7 +721,7 @@ where
     /// enable mic
     pub fn exit_tx_mute(&mut self) -> Result<(), BUS::Error> {
         self.bitbang.write_reg(
-            bk4819_n::Reg50::new()
+            Reg50::new()
                 .with_aftx_mute(false)
                 .with_undocumented(0b11101100100000),
         )?;
