@@ -137,6 +137,14 @@ where
         self.bk.write_reg_raw(reg.as_u8(), value)
     }
 
+    pub fn __internal_write_register_raw(&mut self, reg: u8, value: u16) -> Result<(), BUS::Error> {
+        self.bk.write_reg_raw(reg, value)
+    }
+
+    pub fn __internal_read_register_raw(&mut self, reg: u8) -> Result<u16, BUS::Error> {
+        self.bk.read_reg_raw(reg)
+    }
+
     pub fn write_register<R: bk4819_n::Bk4819Register>(
         &mut self,
         reg: R,

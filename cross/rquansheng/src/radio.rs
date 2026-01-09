@@ -45,7 +45,7 @@ impl Default for ChannelConfig {
             bandwidth: FilterBandwidth::Wide,
             tx_bias: 20,
             mic_gain: 16, // ~8.0 dB (matches the reference firmware's mid preset)
-            roger_mode: RogerMode::Off,
+            roger_mode: RogerMode::Roger,
         }
     }
 }

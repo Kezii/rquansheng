@@ -10,3 +10,4 @@ embedded-hal = "1.0.0"
 env_logger = "0.11.8"
 log = "0.4.29"
 rquansheng = {path = "../cross/rquansheng"}
+serialport = "4.8.1"

@@ -16,7 +16,6 @@ use dp32g030 as pac;
 
 use embedded_hal_nb::serial;
 use embedded_io as eio;
-
 use crate::gpio::Port;
 
 /// UART configuration.
@@ -196,6 +195,30 @@ pub struct Uart<UART, TX, RX> {
     uart: UART,
     _tx: TX,
     _rx: RX,
+}
+
+/// UART TX half returned by [`Uart::split`].
+///
+/// This type implements `embedded-hal-nb` `serial::Write` and `embedded-io` `Write`.
+pub struct Tx<UART, TX> {
+    _uart: UART,
+    _tx: TX,
+}
+
+impl<UART, TX> Tx<UART, TX> {
+    /// Release the owned UART peripheral and TX pin.
+    #[inline]
+    pub fn free(self) -> (UART, TX) {
+        (self._uart, self._tx)
+    }
+}
+
+/// UART RX half returned by [`Uart::split`].
+///
+/// This type implements `embedded-hal-nb` `serial::Read`.
+pub struct Rx<UART, RX> {
+    _rx: RX,
+    _uart: PhantomData<UART>,
 }
 
 mod sealed {
@@ -499,6 +522,22 @@ impl<UART: Instance, TX, RX> Uart<UART, TX, RX> {
     pub fn free(self) -> (UART, TX, RX) {
         (self.uart, self._tx, self._rx)
     }
+
+    /// Split this UART into independent TX/RX halves.
+    ///
+    /// Note: the returned `Rx` half does not own the PAC UART peripheral value,
+    /// but it can still access the UART registers via [`Instance::regs`].
+    #[inline]
+    pub fn split(self) -> (Tx<UART, TX>, Rx<UART, RX>) {
+        let (uart, tx, rx) = self.free();
+        (
+            Tx { _uart: uart, _tx: tx },
+            Rx {
+                _rx: rx,
+                _uart: PhantomData,
+            },
+        )
+    }
 }
 
 macro_rules! impl_uart {
@@ -617,7 +656,52 @@ macro_rules! impl_uart {
             type Error = Error;
         }
 
+        impl<TX> serial::ErrorType for Tx<$UART, TX> {
+            type Error = Error;
+        }
+
+        impl<TX> eio::ErrorType for Tx<$UART, TX> {
+            type Error = Error;
+        }
+
+        impl<RX> serial::ErrorType for Rx<$UART, RX> {
+            type Error = Error;
+        }
+
         impl<TX, RX> serial::Read<u8> for Uart<$UART, TX, RX> {
+            fn read(&mut self) -> nb::Result<u8, Self::Error> {
+                let regs = <$UART as Instance>::regs();
+
+                let ifr = regs.$if_().read();
+
+                // Latched error flags (write-1-to-clear)
+                if ifr.rxfifo_ovf().bit_is_set() {
+                    regs.$if_().write(|w| unsafe { w.bits(1u32 << 8) });
+                    return Err(nb::Error::Other(Error::Overrun));
+                }
+                if ifr.parritye().bit_is_set() {
+                    regs.$if_().write(|w| unsafe { w.bits(1u32 << 3) });
+                    return Err(nb::Error::Other(Error::Parity));
+                }
+                if ifr.stope().bit_is_set() {
+                    regs.$if_().write(|w| unsafe { w.bits(1u32 << 4) });
+                    return Err(nb::Error::Other(Error::Frame));
+                }
+                if ifr.rxto().bit_is_set() {
+                    regs.$if_().write(|w| unsafe { w.bits(1u32 << 5) });
+                    return Err(nb::Error::Other(Error::RxTimeout));
+                }
+
+                if ifr.rxfifo_empty().bit_is_set() {
+                    return Err(nb::Error::WouldBlock);
+                }
+
+                let data = regs.$rdr().read().rdr().bits() as u16;
+                Ok((data & 0xFF) as u8)
+            }
+        }
+
+        impl<RX> serial::Read<u8> for Rx<$UART, RX> {
             fn read(&mut self) -> nb::Result<u8, Self::Error> {
                 let regs = <$UART as Instance>::regs();
 
@@ -674,7 +758,44 @@ macro_rules! impl_uart {
             }
         }
 
+        impl<TX> serial::Write<u8> for Tx<$UART, TX> {
+            fn write(&mut self, word: u8) -> nb::Result<(), Self::Error> {
+                let regs = <$UART as Instance>::regs();
+                let ifr = regs.$if_().read();
+
+                if ifr.txfifo_full().bit_is_set() {
+                    return Err(nb::Error::WouldBlock);
+                }
+
+                regs.$tdr().write(|w| unsafe { w.tdr().bits(word as u16) });
+                Ok(())
+            }
+
+            fn flush(&mut self) -> nb::Result<(), Self::Error> {
+                let regs = <$UART as Instance>::regs();
+                let ifr = regs.$if_().read();
+                if ifr.txbusy().bit_is_set() {
+                    Err(nb::Error::WouldBlock)
+                } else {
+                    Ok(())
+                }
+            }
+        }
+
         impl<TX, RX> eio::Write for Uart<$UART, TX, RX> {
+            fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
+                for &b in buf {
+                    nb::block!(<Self as serial::Write<u8>>::write(self, b))?;
+                }
+                Ok(buf.len())
+            }
+
+            fn flush(&mut self) -> Result<(), Self::Error> {
+                nb::block!(<Self as serial::Write<u8>>::flush(self))
+            }
+        }
+
+        impl<TX> eio::Write for Tx<$UART, TX> {
             fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
                 for &b in buf {
                     nb::block!(<Self as serial::Write<u8>>::write(self, b))?;

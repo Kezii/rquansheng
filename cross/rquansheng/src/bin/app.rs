@@ -6,7 +6,7 @@ use rquansheng::{self as _}; // global logger + panicking-behavior + memory layo
 
 use dp30g030_hal as _;
 
-use rtic_monotonics::{fugit::Duration, systick::prelude::*};
+use rtic_monotonics::systick::prelude::*;
 
 use static_cell::StaticCell;
 
@@ -51,17 +51,54 @@ mod app {
     use dp30g030_hal::gpio::{Input, Output, Pin, Port};
     use dp30g030_hal::uart;
     use embedded_hal::digital::{InputPin, OutputPin};
+    use embedded_io_async::{Read as AsyncRead, Write as AsyncWrite};
+    use heapless::Vec;
     use rquansheng::bk4819::Bk4819Driver;
     use rquansheng::bk4819_bitbang::{Bk4819, Bk4819BitBang, Dp32g030BidiPin};
     use rquansheng::delay::CycleDelay;
-    use rquansheng::dialer::Dialer;
-    use rquansheng::display::{DisplayMgr, RenderingMgr};
+    use rquansheng::display::DisplayMgr;
     use rquansheng::keyboard::KeyboardState;
-    use rquansheng::radio::{ChannelConfig as RadioConfig, RadioController};
+    use rquansheng::messages::{decode_line, encode_line, HostBound, RadioBound};
+    use rquansheng::radio::RadioController;
     use rtic_monotonics::{fugit::ExtU32, Monotonic as _};
     use rtic_sync::signal::{Signal, SignalReader, SignalWriter};
 
     use crate::Mono;
+
+    #[derive(Debug)]
+    enum ReadLineError {
+        Uart,
+        TooLong,
+    }
+
+    async fn read_until_zero<R>(
+        rx: &mut R,
+        max_len: usize,
+    ) -> Result<Vec<u8, 64>, ReadLineError>
+    where
+        R: AsyncRead,
+    {
+        let limit = max_len.min(64);
+        let mut out = Vec::<u8, 64>::new();
+        let mut buf = [0u8; 1];
+
+        loop {
+            if out.len() >= limit {
+                return Err(ReadLineError::TooLong);
+            }
+
+            // `embedded-io-async` waits until at least 1 byte is available (for non-empty buffers).
+            rx.read_exact(&mut buf)
+                .await
+                .map_err(|_| ReadLineError::Uart)?;
+            let b = buf[0];
+
+            out.push(b).map_err(|_| ReadLineError::TooLong)?;
+            if b == 0 {
+                return Ok(out);
+            }
+        }
+    }
 
     // Shared resources go here
     #[shared]
@@ -77,7 +114,7 @@ mod app {
     struct Local {
         pin_flashlight: Pin<Output>,
         pin_backlight: Pin<Output>,
-        //uart1: uart::Uart1,
+        uart1: Option<uart::Uart1>,
         pin_audio_path: Pin<Output>,
         pin_ptt: Pin<Input>,
         adc: adc::Adc,
@@ -134,8 +171,6 @@ mod app {
         )
         .unwrap();
 
-        defmt_serial::defmt_serial(crate::SERIAL.init(uart1));
-
         // SARADC: battery voltage is on SARADC CH4, pin PA9.
         // C firmware conversion: v_10mV = raw * 760 / gBatteryCalibration[3].
         // We do not use EEPROM calibration here; keep a default in the middle
@@ -165,7 +200,6 @@ mod app {
             defmt::warn!("radio init failed");
         }
 
-        task1::spawn().ok();
         uart_task::spawn().ok();
         radio_10ms_task::spawn().ok();
         display_task::spawn().ok();
@@ -182,7 +216,7 @@ mod app {
                 // Initialization of local resources go here
                 pin_flashlight,
                 pin_backlight,
-                //uart1,
+                uart1: Some(uart1),
                 pin_audio_path,
                 pin_ptt,
                 adc,
@@ -204,25 +238,60 @@ mod app {
         }
     }
 
-    // TODO: Add tasks
-    #[task(priority = 1, local = [pin_flashlight])]
-    async fn task1(cx: task1::Context<Local>) {
-        defmt::info!("Hello from task1!");
+    #[task(priority = 1, local = [uart1, pin_flashlight], shared = [radio])]
+    async fn uart_task(mut cx: uart_task::Context) {
+        //defmt_serial::defmt_serial(crate::SERIAL.init(uart1));
+        let uart1 = cx
+            .local
+            .uart1
+            .take()
+            .expect("uart_task started without uart1");
+        let (mut tx, mut _rx) = uart1.split();
 
         loop {
+            let line = read_until_zero(&mut _rx, 64).await;
+            let line = line.unwrap_or(Vec::new());
             cx.local.pin_flashlight.set_high();
-            //cx.local.pin_backlight.set_low();
-            Mono::delay(10.millis()).await;
 
+            let message = decode_line::<RadioBound>(&line);
+
+            if let Ok(message) = message {
+                match message {
+                    RadioBound::Ping => {
+                        let reply = HostBound::Pong;
+                        let reply_encoded = encode_line(&reply).unwrap();
+                        tx.write_all(&reply_encoded).await.unwrap();
+                    }
+
+                    RadioBound::WriteRegister(reg, value) => {
+                        cx.shared
+                            .radio
+                            .lock(|r| r.bk.__internal_write_register_raw(reg, value));
+                        let reply = HostBound::WriteAck(reg, value);
+                        let reply_encoded = encode_line(&reply).unwrap();
+                        tx.write_all(&reply_encoded).await.unwrap();
+                    }
+
+                    RadioBound::ReadRegister(reg) => {
+                        let value = cx
+                            .shared
+                            .radio
+                            .lock(|r| r.bk.__internal_read_register_raw(reg));
+                        let reply = HostBound::Register(reg, value.unwrap_or(0));
+                        let reply_encoded = encode_line(&reply).unwrap();
+                        tx.write_all(&reply_encoded).await.unwrap();
+                    }
+
+                    _ => {}
+                }
+            }
             cx.local.pin_flashlight.set_low();
-            //cx.local.pin_backlight.set_high();
-            Mono::delay(1500.millis()).await;
         }
     }
 
     // UART demo task: writes a message periodically on UART1.
     #[task(priority = 1, local = [adc])]
-    async fn uart_task(cx: uart_task::Context) {
+    async fn adc_task(cx: adc_task::Context) {
         loop {
             let raw = cx.local.adc.read_blocking(adc::Channel::Ch4).unwrap_or(0);
 

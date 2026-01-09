@@ -16,6 +16,12 @@ use rquansheng::{
     keyboard::{KeyEvent, QuanshengKey},
     radio::RadioController,
 };
+use std::io::{self};
+use std::time::Duration;
+
+use crate::uartbackedbus::SerialProtocolRadioBus;
+
+mod uartbackedbus;
 
 fn main() -> Result<(), core::convert::Infallible> {
     env_logger::init();
@@ -30,10 +36,11 @@ fn main() -> Result<(), core::convert::Infallible> {
         .build();
     let mut window = Window::new("rQuansheng", &output_settings);
 
-    let dummy_radio_bus = DummyRadioBus;
+    let radio_bus =
+        SerialProtocolRadioBus::open("/dev/ttyUSB0", 38400, Duration::from_millis(5000)).unwrap();
     let mut dummy_delay = DummyDelay;
 
-    let mut radio = RadioController::new(Bk4819Driver::new(Bk4819::new(dummy_radio_bus)));
+    let mut radio = RadioController::new(Bk4819Driver::new(Bk4819::new(radio_bus)));
     window.update(&display);
 
     'main: loop {
@@ -66,7 +73,7 @@ fn main() -> Result<(), core::convert::Infallible> {
 
         radio.poll_interrupts().ok();
 
-        std::thread::sleep(std::time::Duration::from_millis(50));
+        std::thread::sleep(std::time::Duration::from_millis(100));
     }
 
     Ok(())
@@ -121,7 +128,7 @@ pub fn keycode_to_quansheng_key(keycode: Keycode) -> Option<QuanshengKey> {
 pub struct DummyRadioBus;
 
 impl Bk4819Bus for DummyRadioBus {
-    type Error = ();
+    type Error = io::Error;
 
     fn write_reg_raw(&mut self, reg: u8, value: u16) -> Result<(), Self::Error> {
         info!("write_reg: 0x{:x} 0x{:x}", reg, value);
