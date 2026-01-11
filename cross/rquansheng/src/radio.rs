@@ -9,13 +9,13 @@ use embedded_graphics::pixelcolor::BinaryColor;
 use embedded_graphics::prelude::DrawTarget;
 use embedded_hal::delay::DelayNs;
 
-use crate::bk4819::regs::Register_old;
 use crate::bk4819::{Bk4819Driver, FilterBandwidth, GpioPin, RogerMode};
 use crate::bk4819_bitbang::Bk4819Bus;
 use crate::bk4819_n::{AfOutSel, Reg3F};
 use crate::dialer::Dialer;
 use crate::display::RenderingMgr;
-use crate::keyboard::{KeyEvent, KeyboardState, QuanshengKey};
+use crate::keyboard::{KeyEvent, QuanshengKey};
+use crate::radio_platform::RadioPlatform;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum Mode {
@@ -62,28 +62,36 @@ impl Events {
     }
 }
 
-pub struct RadioController<BUS>
+pub struct RadioController<BUS, PLATFORM>
 where
     BUS: Bk4819Bus,
+    PLATFORM: RadioPlatform,
 {
     pub bk: Bk4819Driver<BUS>,
+    pub platform: PLATFORM,
     pub channel_cfg: ChannelConfig,
     mode: Mode,
     squelch_open: bool,
+    audio_on: bool,
     rendering_mgr: RenderingMgr,
     dialer: Dialer<8>,
 }
 
-impl<BUS> RadioController<BUS>
+impl<BUS, PLATFORM> RadioController<BUS, PLATFORM>
 where
     BUS: Bk4819Bus,
+    PLATFORM: RadioPlatform,
 {
-    pub fn new(bk: Bk4819Driver<BUS>) -> Self {
+    pub fn new(bk: Bk4819Driver<BUS>, mut platform: PLATFORM) -> Self {
+        platform.audio_path_off();
+        platform.backlight_on();
         Self {
             bk,
+            platform,
             channel_cfg: ChannelConfig::default(),
             mode: Mode::Rx,
             squelch_open: false,
+            audio_on: false,
             rendering_mgr: RenderingMgr::default(),
             dialer: Dialer::default(),
         }
@@ -109,10 +117,19 @@ where
     /// - TX: always off (matches reference firmware)
     /// - RX: on only when squelch is open
     #[inline]
-    pub fn desired_audio_on(&self) -> bool {
-        match self.mode {
+    pub fn think_platform(&mut self) {
+        let new_audio_on = match self.mode {
             Mode::Tx => false,
             Mode::Rx => self.squelch_open,
+        };
+
+        if new_audio_on != self.audio_on {
+            self.audio_on = new_audio_on;
+            if new_audio_on {
+                self.platform.audio_path_on();
+            } else {
+                self.platform.audio_path_off();
+            }
         }
     }
 
@@ -223,7 +240,7 @@ where
         // - tones disabled
         // - modulation set (FM)
         // - TX is already enabled by `prepare_transmit()` (REG_30=0xC1FE), so just leave it running.
-        self.bk.write_register_raw(Register_old::Reg70, 0x0000)?;
+        self.bk.disable_tones()?;
         self.bk.set_af(AfOutSel::Normal)?;
 
         Ok(())

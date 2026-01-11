@@ -20,6 +20,7 @@ pub(crate) mod i2c_bitbang;
 pub mod keyboard;
 pub mod messages;
 pub mod radio;
+pub mod radio_platform;
 
 use dp32g030 as _;
 

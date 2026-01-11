@@ -8,15 +8,13 @@ use embedded_graphics_simulator::{
     BinaryColorTheme, OutputSettingsBuilder, SimulatorDisplay, SimulatorEvent, Window,
     sdl2::{Keycode, MouseButton},
 };
-use embedded_hal::delay::DelayNs;
-use log::info;
+
 use rquansheng::{
     bk4819::Bk4819Driver,
-    bk4819_bitbang::{Bk4819, Bk4819Bus},
+    bk4819_bitbang::{Bk4819},
     keyboard::{KeyEvent, QuanshengKey},
     radio::RadioController,
 };
-use std::io::{self};
 use std::time::Duration;
 
 use host_sw::uartbackedbus::SerialProtocolRadioBus;
@@ -37,8 +35,9 @@ fn main() -> Result<(), core::convert::Infallible> {
     let radio_bus =
         SerialProtocolRadioBus::open("/dev/ttyUSB0", 38400, Duration::from_millis(5000)).unwrap();
     let mut dummy_delay = host_sw::delay::DummyDelay;
+    let dummy_platform = host_sw::dummy_platform::DummyPlatform;
 
-    let mut radio = RadioController::new(Bk4819Driver::new(Bk4819::new(radio_bus)));
+    let mut radio = RadioController::new(Bk4819Driver::new(Bk4819::new(radio_bus)), dummy_platform);
     window.update(&display);
 
     'main: loop {

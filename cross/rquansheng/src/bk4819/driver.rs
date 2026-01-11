@@ -462,7 +462,7 @@ where
     #[allow(clippy::too_many_arguments)]
     pub fn setup_squelch(&mut self, thresholds: SquelchThresholds) -> Result<(), BUS::Error> {
         // Disable tones
-        self.write_register_raw(Register_old::Reg70, 0)?;
+        self.disable_tones()?;
 
         // Glitch threshold for squelch close
         self.write_register_raw(Register_old::Reg4D, 0xA000 | thresholds.close_glitch as u16)?;
@@ -659,7 +659,7 @@ where
     pub fn exit_dtmf_tx(&mut self, keep_muted: bool) -> Result<(), BUS::Error> {
         self.enter_tx_mute()?;
         self.set_af(AfOutSel::Mute)?;
-        self.write_register_raw(Register_old::Reg70, 0x0000)?;
+        self.disable_tones()?;
         self.disable_dtmf()?;
         self.write_register_raw(Register_old::Reg30, 0xC1FE)?;
         if !keep_muted {
@@ -698,6 +698,9 @@ where
         Ok(())
     }
 
+    pub fn disable_tones(&mut self) -> Result<(), BUS::Error> {
+        self.bitbang.write_reg(Reg70::from(0))
+    }
     // --- Tone / TX link / mute ---------------------------------------------
 
     /// disable mic for tone transmission
@@ -796,7 +799,7 @@ where
             self.set_af(AfOutSel::Mute)?;
         }
 
-        self.write_register_raw(Register_old::Reg70, 0x0000)?;
+        self.disable_tones()?;
         self.write_register_raw(Register_old::Reg30, 0xC1FE)?;
         self.exit_tx_mute()
     }
@@ -832,7 +835,7 @@ where
     }
 
     pub fn turns_off_tones_turns_on_rx(&mut self) -> Result<(), BUS::Error> {
-        self.write_register_raw(Register_old::Reg70, 0x0000)?;
+        self.disable_tones()?;
         self.set_af(AfOutSel::Mute)?;
         self.exit_tx_mute()?;
         self.disable()?;
@@ -870,7 +873,7 @@ where
     }
 
     pub fn exit_sub_au(&mut self) -> Result<(), BUS::Error> {
-        self.write_register_raw(Register_old::Reg51, 0x0000)
+        self.bitbang.write_reg(Reg51::from(0))
     }
 
     pub fn conditional_rx_turn_on_and_gpio0_enable(&mut self) -> Result<(), BUS::Error> {
@@ -1154,7 +1157,7 @@ where
         delay.delay_ms(20);
         self.enter_tx_mute()?;
 
-        self.write_register_raw(Register_old::Reg70, 0x0000)?;
+        self.disable_tones()?;
         self.write_register_raw(Register_old::Reg30, 0xC1FE)?;
         Ok(())
     }
@@ -1183,7 +1186,7 @@ where
         delay.delay_ms(180);
 
         self.write_register_raw(Register_old::Reg59, 0x0068)?;
-        self.write_register_raw(Register_old::Reg70, 0x0000)?;
+        self.disable_tones()?;
         self.write_register_raw(Register_old::Reg58, 0x0000)?;
         Ok(())
     }

@@ -1307,6 +1307,7 @@ pub struct Reg50 {
 }
 
 /// REG_51: CTCSS/CDCSS Tx control.
+#[address(0x51)]
 #[bitfield(u16)]
 pub struct Reg51 {
     /// CTCSS/CDCSS Tx Gain1 Tuning. 0=min;0x7F=max
@@ -1351,6 +1352,7 @@ pub struct Reg52 {
 }
 
 /// REG_54: 300Hz AF response coefficient for Rx (part 1).
+#[address(0x54)]
 #[bitfield(u16)]
 pub struct Reg54 {
     /// Coefficient.
@@ -1571,6 +1573,7 @@ pub struct Reg6F {
 }
 
 /// REG_70: Tone enable and gain.
+#[address(0x70)]
 #[bitfield(u16)]
 pub struct Reg70 {
     /// TONE2/FSK tuning gain.

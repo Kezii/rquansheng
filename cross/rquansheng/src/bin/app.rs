@@ -8,8 +8,6 @@ use dp30g030_hal as _;
 
 use rtic_monotonics::systick::prelude::*;
 
-use static_cell::StaticCell;
-
 systick_monotonic!(Mono, 1_00);
 
 #[derive(Copy, Clone)]
@@ -36,8 +34,6 @@ defmt::timestamp!("{}", {
     }
 });
 
-static SERIAL: StaticCell<dp30g030_hal::uart::Uart1> = StaticCell::new();
-
 // TODO(7) Configure the `rtic::app` macro
 #[rtic::app(
     device = dp30g030_hal,
@@ -60,6 +56,7 @@ mod app {
     use rquansheng::keyboard::KeyboardState;
     use rquansheng::messages::{decode_line, encode_line, HostBound, RadioBound};
     use rquansheng::radio::RadioController;
+    use rquansheng::radio_platform::UVK5RadioPlatform;
     use rtic_monotonics::{fugit::ExtU32, Monotonic as _};
     use rtic_sync::signal::{Signal, SignalReader, SignalWriter};
 
@@ -100,9 +97,10 @@ mod app {
     // Shared resources go here
     #[shared]
     struct Shared {
-        radio:
-            RadioController<Bk4819BitBang<Pin<Output>, Pin<Output>, Dp32g030BidiPin, CycleDelay>>,
-        audio_on: bool,
+        radio: RadioController<
+            Bk4819BitBang<Pin<Output>, Pin<Output>, Dp32g030BidiPin, CycleDelay>,
+            UVK5RadioPlatform,
+        >,
         /// Lock for PA10/PA11 shared between keypad scanning and EEPROM (bit-banged I2C).
         i2c_lock: (),
         //dialer: Dialer,
@@ -111,30 +109,23 @@ mod app {
     // Local resources go here
     #[local]
     struct Local {
-        pin_flashlight: Pin<Output>,
-        pin_backlight: Pin<Output>,
         uart1: Option<uart::Uart1>,
-        pin_audio_path: Pin<Output>,
         pin_ptt: Pin<Input>,
         adc: adc::Adc,
         keyboard_state: KeyboardState,
         display: DisplayMgr,
         display_update_reader: SignalReader<'static, bool>,
         display_update_writer: SignalWriter<'static, bool>,
+        pin_flashlight: Pin<Output>,
     }
 
     // NOTE: BK4819 driver logic has moved to `src/bk4819/`.
 
     #[init(local = [poke_display_update: Signal<bool> = Signal::new()])]
     fn init(cx: init::Context) -> (Shared, Local) {
+        // this pin is in platform too, but we duplicate it because it's used in the uart task
         let pin_flashlight =
             Pin::new(Port::C, 3).into_push_pull_output(&cx.device.SYSCON, &cx.device.PORTCON);
-        let pin_backlight =
-            Pin::new(Port::B, 6).into_push_pull_output(&cx.device.SYSCON, &cx.device.PORTCON);
-        let mut pin_audio_path =
-            Pin::new(Port::C, 4).into_push_pull_output(&cx.device.SYSCON, &cx.device.PORTCON);
-        // Start with audio path OFF like the reference firmware does.
-        let _ = pin_audio_path.set_low();
 
         // BK4819 bit-bang pins: PC0=SCN, PC1=SCL, PC2=SDA (bidirectional).
         let scn = Pin::new(Port::C, 0).into_push_pull_output(&cx.device.SYSCON, &cx.device.PORTCON);
@@ -145,7 +136,9 @@ mod app {
         let bus = Bk4819BitBang::new(scn, scl, sda, delay_bb);
         let bk = Bk4819Driver::new(Bk4819::new(bus));
 
-        let mut radio = RadioController::new(bk);
+        let platform = UVK5RadioPlatform::new(&cx.device.SYSCON, &cx.device.PORTCON);
+
+        let mut radio = RadioController::new(bk, platform);
 
         // PTT is PC5, active-low, with pull-up enabled in the reference firmware.
         // We do simple polling + debounce in `radio_10ms_task`.
@@ -209,21 +202,18 @@ mod app {
             Shared {
                 // Initialization of shared resources go here
                 radio,
-                audio_on: false,
                 i2c_lock: (),
             },
             Local {
                 // Initialization of local resources go here
-                pin_flashlight,
-                pin_backlight,
                 uart1: Some(uart1),
-                pin_audio_path,
                 pin_ptt,
                 adc,
                 display,
                 keyboard_state,
                 display_update_reader,
                 display_update_writer,
+                pin_flashlight,
             },
         )
     }
@@ -317,10 +307,8 @@ mod app {
         }
     }
 
-    #[task(priority = 1, local = [pin_backlight,display,display_update_reader], shared = [radio])]
+    #[task(priority = 1, local = [display,display_update_reader], shared = [radio])]
     async fn display_task(mut cx: display_task::Context) {
-        cx.local.pin_backlight.set_high();
-
         loop {
             let _ = cx
                 .shared
@@ -336,7 +324,7 @@ mod app {
     }
 
     /// 10ms tick task: poll+debounce PTT, poll BK4819 interrupts, and update audio.
-    #[task(priority = 1, shared = [radio, audio_on, i2c_lock], local = [pin_audio_path, pin_ptt, keyboard_state,display_update_writer])]
+    #[task(priority = 1, shared = [radio, i2c_lock], local = [pin_ptt, keyboard_state,display_update_writer])]
     async fn radio_10ms_task(mut cx: radio_10ms_task::Context) {
         // Simple debounce (like C firmware): require 3 consecutive 10ms samples.
         let mut ptt_last_sample = false;
@@ -370,7 +358,7 @@ mod app {
 
             // Do everything that touches BK4819 under one lock, then act on the GPIO audio path.
 
-            let desired_audio_on = cx.shared.radio.lock(|r| {
+            cx.shared.radio.lock(|r| {
                 r.eat_keyboard_event(event, &mut CycleDelay::new(48_000_000));
 
                 //r.eat_ptt(ptt_stable, &mut cx.local.radio_delay);
@@ -379,16 +367,8 @@ mod app {
                 r.poll_interrupts().ok();
 
                 // Board audio path should follow controller's desired state.
-                r.desired_audio_on()
+                r.think_platform()
             });
-
-            cx.shared.audio_on.lock(|a| *a = desired_audio_on);
-
-            if desired_audio_on {
-                let _ = cx.local.pin_audio_path.set_high();
-            } else {
-                let _ = cx.local.pin_audio_path.set_low();
-            }
 
             // if a key was pressed, we hurry a display update
             if let Some(key) = event {
