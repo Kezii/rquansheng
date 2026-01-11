@@ -232,55 +232,39 @@ where
     /// Poll BK4819 interrupt status in the same way the reference C firmware does.
     ///
     /// Returns squelch events (open/close) if observed.
-    pub fn poll_interrupts(&mut self) -> Result<Events, BUS::Error> {
+    pub fn poll_interrupts(&mut self) -> Result<(), BUS::Error> {
         if self.mode != Mode::Rx {
-            return Ok(Events::none());
+            return Ok(());
         }
-
-        // BK4819 REG_02 interrupt/status bits (ported from `bk4819-regs.h`):
-        const REG_02_SQUELCH_FOUND: u16 = 1u16 << 3;
-        const REG_02_SQUELCH_LOST: u16 = 1u16 << 2;
-
-        let mut ev = Events::none();
 
         // Match C firmware behavior:
         // while (ReadRegister(REG_0C) & 1) { WriteRegister(REG_02, 0); st=ReadRegister(REG_02); ... }
         // Safety cap: avoid spinning forever if the line is stuck.
         for _ in 0..8 {
-            let irq_req = self.bk.read_register_raw(Register_old::Reg0C)? & 1;
-            if irq_req == 0 {
+            let irq = self.bk.get_irq_indicators()?;
+
+            if !irq.irq() {
                 break;
             }
 
-            // clear interrupts first (as in C)
-            self.bk.write_register_raw(Register_old::Reg02, 0)?;
+            self.bk.clear_interrupts()?;
 
-            // then read status bits
-            let st = self.bk.read_register_raw(Register_old::Reg02)?;
+            let interrupts = self.bk.get_interrupts()?;
 
-            if (st & REG_02_SQUELCH_LOST) != 0 {
+            // the interrupts are documented the other way around ??
+            if interrupts.squelch_lost() {
                 self.squelch_open = true;
-                ev.squelch_open = Some(true);
+                self.bk.toggle_gpio_out(GpioPin::Gpio6Green, true)?;
+                self.bk.set_af(AfOutSel::Normal)?;
             }
-            if (st & REG_02_SQUELCH_FOUND) != 0 {
+            if interrupts.squelch_found() {
                 self.squelch_open = false;
-                ev.squelch_open = Some(false);
+                self.bk.toggle_gpio_out(GpioPin::Gpio6Green, false)?;
+                self.bk.set_af(AfOutSel::Mute)?;
             }
         }
 
-        // Mirror C LED behavior:
-        // - sqlLost  => GREEN on
-        // - sqlFound => GREEN off
-        if let Some(open) = ev.squelch_open {
-            let _ = self.bk.toggle_gpio_out(GpioPin::Gpio6Green, open);
-            let _ = self.bk.set_af(if open {
-                AfOutSel::Normal
-            } else {
-                AfOutSel::Mute
-            });
-        }
-
-        Ok(ev)
+        Ok(())
     }
 }
 

@@ -55,7 +55,9 @@ macro_rules! impl_uart_async {
                 let regs = <$UART as Instance>::regs();
 
                 #[inline(always)]
-                fn check_and_clear_rx_errors(regs: &<$UART as Instance>::Regs) -> Result<(), Error> {
+                fn check_and_clear_rx_errors(
+                    regs: &<$UART as Instance>::Regs,
+                ) -> Result<(), Error> {
                     let ifr = regs.$if_().read();
 
                     // Latched error flags (write-1-to-clear)
@@ -123,7 +125,9 @@ macro_rules! impl_uart_async {
                 let regs = <$UART as Instance>::regs();
 
                 #[inline(always)]
-                fn check_and_clear_rx_errors(regs: &<$UART as Instance>::Regs) -> Result<(), Error> {
+                fn check_and_clear_rx_errors(
+                    regs: &<$UART as Instance>::Regs,
+                ) -> Result<(), Error> {
                     let ifr = regs.$if_().read();
 
                     // Latched error flags (write-1-to-clear)
@@ -207,7 +211,8 @@ macro_rules! impl_uart_async {
                     if ifr.txfifo_full().bit_is_set() {
                         break;
                     }
-                    regs.$tdr().write(|w| unsafe { w.tdr().bits(buf[n] as u16) });
+                    regs.$tdr()
+                        .write(|w| unsafe { w.tdr().bits(buf[n] as u16) });
                     n += 1;
                 }
 
@@ -257,7 +262,8 @@ macro_rules! impl_uart_async {
                     if ifr.txfifo_full().bit_is_set() {
                         break;
                     }
-                    regs.$tdr().write(|w| unsafe { w.tdr().bits(buf[n] as u16) });
+                    regs.$tdr()
+                        .write(|w| unsafe { w.tdr().bits(buf[n] as u16) });
                     n += 1;
                 }
 
@@ -288,4 +294,3 @@ macro_rules! impl_uart_async {
 impl_uart_async!(pac::UART0, uart0_tdr, uart0_rdr, uart0_if);
 impl_uart_async!(pac::UART1, uart1_tdr, uart1_rdr, uart1_if);
 impl_uart_async!(pac::UART2, uart2_tdr, uart2_rdr, uart2_if);
-

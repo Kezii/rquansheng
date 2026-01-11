@@ -41,6 +41,78 @@ impl<MODE> Pin<MODE> {
     }
 }
 
+/// A "flexible" GPIO pin which can be toggled between input/output at runtime.
+///
+/// This is useful for bit-banged buses (e.g. I2C) where SDA needs to switch
+/// between driving and sampling without consuming/recreating pin types.
+///
+/// It intentionally exposes a low-level API (direction, open-drain, input-enable).
+#[derive(Copy, Clone)]
+pub struct FlexPin {
+    port: Port,
+    pin: u8,
+}
+
+impl FlexPin {
+    #[inline(always)]
+    pub const fn new(port: Port, pin: u8) -> Self {
+        Self { port, pin }
+    }
+
+    #[inline(always)]
+    pub fn port(&self) -> Port {
+        self.port
+    }
+
+    #[inline(always)]
+    pub fn pin(&self) -> u8 {
+        self.pin
+    }
+
+    /// Enable GPIO clock + select GPIO function for this pin.
+    #[inline]
+    pub fn configure_gpio(&self, syscon: &pac::SYSCON, portcon: &pac::PORTCON) {
+        debug_assert!(is_valid_pin(self.port, self.pin));
+        enable_gpio_clock(syscon, self.port);
+        select_gpio_function(portcon, self.port, self.pin);
+    }
+
+    /// Enable/disable input buffer.
+    #[inline]
+    pub fn set_input_enable(&self, portcon: &pac::PORTCON, enable: bool) {
+        debug_assert!(is_valid_pin(self.port, self.pin));
+        set_input_enable(portcon, self.port, self.pin, enable);
+    }
+
+    /// Enable/disable open-drain pad.
+    #[inline]
+    pub fn set_open_drain(&self, portcon: &pac::PORTCON, enable: bool) {
+        debug_assert!(is_valid_pin(self.port, self.pin));
+        set_open_drain(portcon, self.port, self.pin, enable);
+    }
+
+    /// Set pin direction (output=true, input=false).
+    #[inline]
+    pub fn set_output(&self, output: bool) {
+        debug_assert!(is_valid_pin(self.port, self.pin));
+        set_direction(self.port, self.pin, output);
+    }
+
+    /// Drive the pin high/low (for output mode).
+    #[inline]
+    pub fn write(&self, high: bool) {
+        debug_assert!(is_valid_pin(self.port, self.pin));
+        write_data_bit(self.port, self.pin, high);
+    }
+
+    /// Sample pin level (for input mode).
+    #[inline]
+    pub fn read(&self) -> bool {
+        debug_assert!(is_valid_pin(self.port, self.pin));
+        read_data_bit(self.port, self.pin)
+    }
+}
+
 impl Pin<Disabled> {
     /// Create a new pin handle.
     ///

@@ -3,33 +3,11 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
+use host_sw::uartbackedbus::read_line_from_port;
 use rquansheng::messages::HostBound;
 use rquansheng::messages::RadioBound;
 use rquansheng::messages::decode_line;
 use rquansheng::messages::encode_line;
-
-fn read_line_from_port(port: &mut dyn Read, max_len: usize) -> io::Result<Vec<u8>> {
-    let mut out = Vec::with_capacity(max_len.min(256));
-    let mut byte = [0u8; 1];
-    while out.len() < max_len {
-        match port.read(&mut byte) {
-            Ok(0) => continue,
-            Ok(1) => {
-                out.push(byte[0]);
-                if byte[0] == 0 {
-                    return Ok(out);
-                }
-            }
-            Ok(_) => unreachable!("read(1 byte) returned >1"),
-            Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
-            Err(e) => return Err(e),
-        }
-    }
-    Err(io::Error::new(
-        io::ErrorKind::InvalidData,
-        "UART line too long (missing '\\n')",
-    ))
-}
 
 fn main() {
     let mut port = serialport::new("/dev/ttyUSB0", 38400)

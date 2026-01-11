@@ -509,6 +509,8 @@ pub struct Reg00 {
 }
 
 /// REG_02: Interrupt/status flags (read-only).
+/// this is documented as read-only but it's written all the time to "clear interrupts", idk...
+#[address(0x02)]
 #[bitfield(u16)]
 pub struct Reg02 {
     pub undocumented: bool,
@@ -614,6 +616,7 @@ pub struct Reg0B {
 }
 
 /// REG_0C: CTCSS/CDCSS/VoX/Squelch/IRQ indicators (read-only).
+#[address(0x0C)]
 #[bitfield(u16)]
 pub struct Reg0C {
     /// Interrupt Indicator. 1=IRQ request.
@@ -862,6 +865,7 @@ pub struct Reg2E {
 }
 
 /// REG_30: Top-level enable bits.
+#[address(0x30)]
 #[bitfield(u16)]
 pub struct Reg30 {
     /// Rx DSP Enable.

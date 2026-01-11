@@ -14,9 +14,9 @@ use core::{error, fmt};
 
 use dp32g030 as pac;
 
+use crate::gpio::Port;
 use embedded_hal_nb::serial;
 use embedded_io as eio;
-use crate::gpio::Port;
 
 /// UART configuration.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -531,7 +531,10 @@ impl<UART: Instance, TX, RX> Uart<UART, TX, RX> {
     pub fn split(self) -> (Tx<UART, TX>, Rx<UART, RX>) {
         let (uart, tx, rx) = self.free();
         (
-            Tx { _uart: uart, _tx: tx },
+            Tx {
+                _uart: uart,
+                _tx: tx,
+            },
             Rx {
                 _rx: rx,
                 _uart: PhantomData,

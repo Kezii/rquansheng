@@ -50,6 +50,10 @@ pub enum RadioBound {
     Ping,
     WriteRegister(u8, u16),
     ReadRegister(u8),
+    /// Read a single byte from EEPROM at `address`.
+    ReadEepromByte {
+        address: u16,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -57,5 +61,6 @@ pub enum HostBound {
     Pong,
     Register(u8, u16),
     WriteAck(u8, u16),
+    EepromByte { address: u16, value: u8 },
     Ready,
 }

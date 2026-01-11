@@ -103,6 +103,8 @@ mod app {
         radio:
             RadioController<Bk4819BitBang<Pin<Output>, Pin<Output>, Dp32g030BidiPin, CycleDelay>>,
         audio_on: bool,
+        /// Lock for PA10/PA11 shared between keypad scanning and EEPROM (bit-banged I2C).
+        i2c_lock: (),
         //dialer: Dialer,
     }
 
@@ -208,6 +210,7 @@ mod app {
                 // Initialization of shared resources go here
                 radio,
                 audio_on: false,
+                i2c_lock: (),
             },
             Local {
                 // Initialization of local resources go here
@@ -235,7 +238,7 @@ mod app {
         }
     }
 
-    #[task(priority = 1, local = [uart1, pin_flashlight], shared = [radio])]
+    #[task(priority = 1, local = [uart1, pin_flashlight], shared = [radio, i2c_lock])]
     async fn uart_task(mut cx: uart_task::Context) {
         //defmt_serial::defmt_serial(crate::SERIAL.init(uart1));
         let uart1 = cx
@@ -279,7 +282,23 @@ mod app {
                         tx.write_all(&reply_encoded).await.unwrap();
                     }
 
-                    _ => {}
+                    RadioBound::ReadEepromByte { address } => {
+                        let mut value: u8 = 0;
+
+                        cx.shared.i2c_lock.lock(|_| {
+                            let mut d = CycleDelay::new(48_000_000);
+                            let mut buf = [0u8; 1];
+                            if rquansheng::eeprom::read_buffer(&mut d, address, &mut buf).is_ok() {
+                                value = buf[0];
+                            } else {
+                                value = 0;
+                            }
+                        });
+
+                        let reply = HostBound::EepromByte { address, value };
+                        let reply_encoded = encode_line(&reply).unwrap();
+                        tx.write_all(&reply_encoded).await.unwrap();
+                    }
                 }
             }
             cx.local.pin_flashlight.set_low();
@@ -317,7 +336,7 @@ mod app {
     }
 
     /// 10ms tick task: poll+debounce PTT, poll BK4819 interrupts, and update audio.
-    #[task(priority = 1, shared = [radio, audio_on], local = [pin_audio_path, pin_ptt, keyboard_state,display_update_writer])]
+    #[task(priority = 1, shared = [radio, audio_on, i2c_lock], local = [pin_audio_path, pin_ptt, keyboard_state,display_update_writer])]
     async fn radio_10ms_task(mut cx: radio_10ms_task::Context) {
         // Simple debounce (like C firmware): require 3 consecutive 10ms samples.
         let mut ptt_last_sample = false;
@@ -342,7 +361,9 @@ mod app {
             let key = if ptt_stable {
                 Some(rquansheng::keyboard::QuanshengKey::Ptt)
             } else {
-                rquansheng::keyboard::Keyboard::init().poll(&mut CycleDelay::new(48_000_000))
+                cx.shared.i2c_lock.lock(|_| {
+                    rquansheng::keyboard::Keyboard::init().poll(&mut CycleDelay::new(48_000_000))
+                })
             };
 
             let event = cx.local.keyboard_state.eat_key(key);

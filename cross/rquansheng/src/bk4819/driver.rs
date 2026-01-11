@@ -402,16 +402,23 @@ where
     /// Port of `BK4819_SetupPowerAmplifier(bias, frequency)`.
     ///
     pub fn setup_power_amplifier(&mut self, bias: u8, frequency_hz: u32) -> Result<(), BUS::Error> {
-        let gain: u8 = if frequency_hz < 280_000_000 {
-            1u8 << 3
+        if frequency_hz < 280_000_000 {
+            self.bitbang.write_reg::<Reg36>(
+                Reg36::new()
+                    .with_pa_bias(bias)
+                    .with_pa_ctl_output(true)
+                    .with_pa_gain1(1)
+                    .with_pa_gain2(0), //-14.9dBm
+            )
         } else {
-            (4u8 << 3) | 2u8
-        };
-        let enable: u8 = 1;
-        self.write_register_raw(
-            Register_old::Reg36,
-            ((bias as u16) << 8) | ((enable as u16) << 7) | (gain as u16),
-        )
+            self.bitbang.write_reg::<Reg36>(
+                Reg36::new()
+                    .with_pa_bias(bias)
+                    .with_pa_ctl_output(true)
+                    .with_pa_gain1(4)
+                    .with_pa_gain2(2), //0.13dBm
+            )
+        }
     }
 
     /// Port of `BK4819_SetFrequency(freq)`.
@@ -495,7 +502,7 @@ where
     /// Port of `BK4819_RX_TurnOn()`.
     pub fn rx_turn_on(&mut self) -> Result<(), BUS::Error> {
         self.write_register_raw(Register_old::Reg37, 0x1F0F)?;
-        self.write_register_raw(Register_old::Reg30, 0x0000)?;
+        self.disable()?;
         self.write_register_raw(
             Register_old::Reg30,
             REG_30_ENABLE_VCO_CALIB
@@ -744,7 +751,7 @@ where
         cfg |= gain << REG_70_SHIFT_TONE1_TUNING_GAIN;
         self.write_register_raw(Register_old::Reg70, cfg)?;
 
-        self.write_register_raw(Register_old::Reg30, 0x0000)?;
+        self.disable()?;
         self.write_register_raw(
             Register_old::Reg30,
             REG_30_ENABLE_AF_DAC | REG_30_ENABLE_DISC_MODE | REG_30_ENABLE_TX_DSP,
@@ -820,19 +827,15 @@ where
     // --- Power states -------------------------------------------------------
 
     pub fn sleep(&mut self) -> Result<(), BUS::Error> {
-        self.write_register_raw(Register_old::Reg30, 0x0000)?;
+        self.disable()?;
         self.write_register_raw(Register_old::Reg37, 0x1D00)
-    }
-
-    pub fn idle(&mut self) -> Result<(), BUS::Error> {
-        self.write_register_raw(Register_old::Reg30, 0x0000)
     }
 
     pub fn turns_off_tones_turns_on_rx(&mut self) -> Result<(), BUS::Error> {
         self.write_register_raw(Register_old::Reg70, 0x0000)?;
         self.set_af(AfOutSel::Mute)?;
         self.exit_tx_mute()?;
-        self.write_register_raw(Register_old::Reg30, 0x0000)?;
+        self.disable()?;
         self.write_register_raw(
             Register_old::Reg30,
             REG_30_ENABLE_VCO_CALIB
@@ -862,7 +865,7 @@ where
     pub fn tx_on_beep(&mut self) -> Result<(), BUS::Error> {
         self.write_register_raw(Register_old::Reg37, 0x1D0F)?;
         self.write_register_raw(Register_old::Reg52, 0x028F)?;
-        self.write_register_raw(Register_old::Reg30, 0x0000)?;
+        self.disable()?;
         self.write_register_raw(Register_old::Reg30, 0xC1FE)
     }
 
@@ -1016,7 +1019,7 @@ where
     }
 
     pub fn disable(&mut self) -> Result<(), BUS::Error> {
-        self.write_register_raw(Register_old::Reg30, 0x0000)
+        self.bitbang.write_reg::<Reg30>(Reg30::from(0))
     }
 
     pub fn stop_scan(&mut self) -> Result<(), BUS::Error> {
@@ -1025,6 +1028,19 @@ where
     }
 
     // --- Misc getters -------------------------------------------------------
+
+    pub fn get_irq_indicators(&mut self) -> Result<Reg0C, BUS::Error> {
+        self.bitbang.read_reg::<Reg0C>()
+    }
+
+    // this function is used everywhere in the original fw but it's not documented ??
+    pub fn clear_interrupts(&mut self) -> Result<(), BUS::Error> {
+        self.bitbang.write_reg::<Reg02>(Reg02::default())
+    }
+
+    pub fn get_interrupts(&mut self) -> Result<Reg02, BUS::Error> {
+        self.bitbang.read_reg::<Reg02>()
+    }
 
     pub fn get_dtmf_5tone_code(&mut self) -> Result<u8, BUS::Error> {
         Ok(((self.read_register_raw(Register_old::Reg0B)? >> 8) & 0x0F) as u8)
@@ -1048,7 +1064,7 @@ where
         self.write_register_raw(Register_old::Reg3F, 0x0000)?;
         self.write_register_raw(Register_old::Reg59, 0x0068)?;
         delay.delay_ms(30);
-        self.idle()
+        self.disable()
     }
 
     /// Port of `BK4819_SendFSKData(pData)`; `data_words` must be length 36.
@@ -1079,7 +1095,7 @@ where
             delay.delay_ms(5);
         }
 
-        self.write_register_raw(Register_old::Reg02, 0x0000)?;
+        self.clear_interrupts()?;
         delay.delay_ms(20);
         self.reset_fsk(delay)
     }
@@ -1088,8 +1104,8 @@ where
         // Mirror C ordering (minus delays handled externally if needed).
         self.write_register_raw(Register_old::Reg3F, 0x0000)?;
         self.write_register_raw(Register_old::Reg59, 0x0068)?;
-        self.idle()?;
-        self.write_register_raw(Register_old::Reg02, 0x0000)?;
+        self.disable()?;
+        self.clear_interrupts()?;
         self.write_register_raw(Register_old::Reg3F, 0x0000)?;
         self.rx_turn_on()?;
         // Enable FSK RX finished + FIFO almost full
@@ -1175,7 +1191,7 @@ where
     // --- Small helpers mirroring the C "utility" funcs ----------------------
 
     pub fn enable_af_dac_disc_mode_tx_dsp(&mut self) -> Result<(), BUS::Error> {
-        self.write_register_raw(Register_old::Reg30, 0x0000)?;
+        self.disable()?;
         self.write_register_raw(Register_old::Reg30, 0x0302)
     }
 

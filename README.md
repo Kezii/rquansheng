@@ -69,7 +69,7 @@ self.write_register(
 - [ ] bk1080 driver
 - [x] keyboard driver and events
 - [x] display driver
-- [ ] eeprom driver 
+- [x] eeprom driver 
 - [ ] bk4819 hal refactoring (partial)
 
 ## High level

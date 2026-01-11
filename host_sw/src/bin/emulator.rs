@@ -36,7 +36,7 @@ fn main() -> Result<(), core::convert::Infallible> {
 
     let radio_bus =
         SerialProtocolRadioBus::open("/dev/ttyUSB0", 38400, Duration::from_millis(5000)).unwrap();
-    let mut dummy_delay = DummyDelay;
+    let mut dummy_delay = host_sw::delay::DummyDelay;
 
     let mut radio = RadioController::new(Bk4819Driver::new(Bk4819::new(radio_bus)));
     window.update(&display);
@@ -120,14 +120,6 @@ pub fn keycode_to_quansheng_key(keycode: Keycode) -> Option<QuanshengKey> {
         Keycode::F1 => Some(QuanshengKey::Side2),
         Keycode::F2 => Some(QuanshengKey::Side1),
         _ => None,
-    }
-}
-
-pub struct DummyDelay;
-
-impl DelayNs for DummyDelay {
-    fn delay_ns(&mut self, ns: u32) {
-        std::thread::sleep(std::time::Duration::from_nanos(ns as u64));
     }
 }
 
